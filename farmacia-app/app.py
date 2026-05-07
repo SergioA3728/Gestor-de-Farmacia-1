@@ -45,7 +45,37 @@ def init_db():
             total           REAL NOT NULL,
             fecha           TEXT DEFAULT (datetime('now', 'localtime'))
         );
+
+        CREATE TABLE IF NOT EXISTS invima (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            expediente       TEXT,
+            producto         TEXT,
+            principio_activo TEXT,
+            registro         TEXT,
+            estado           TEXT,
+            modalidad        TEXT,
+            titular          TEXT
+        );
     """)
+
+    cur = conn.execute("SELECT COUNT(*) FROM invima")
+    if cur.fetchone()[0] == 0:
+        datos_ejemplo = [
+            ("EXP-001", "ACETAMINOFEN 500mg", "PARACETAMOL", "INVIMA-001", "VIGENTE", "PUBLICADO", "BAYER"),
+            ("EXP-002", "IBUPROFENO 400mg", "IBUPROFENO", "INVIMA-002", "VIGENTE", "PUBLICADO", "GSK"),
+            ("EXP-003", "AMOXICILINA 500mg", "AMOXICILINA", "INVIMA-003", "VIGENTE", "PUBLICADO", "SANDOZ"),
+            ("EXP-004", "LORATADINA 10mg", "LORATADINA", "INVIMA-004", "VIGENTE", "PUBLICADO", "BAYER"),
+            ("EXP-005", "METFORMINA 500mg", "METFORMINA", "INVIMA-005", "VIGENTE", "PUBLICADO", "MERCK"),
+            ("EXP-006", "ENALAPRIL 10mg", "ENALAPRIL", "INVIMA-006", "VIGENTE", "PUBLICADO", "PFIZER"),
+            ("EXP-007", "OMEPRAZOL 20mg", "OMEPRAZOL", "INVIMA-007", "VIGENTE", "PUBLICADO", "ASTRAZENECA"),
+            ("EXP-008", "CREMA HIDRATANTE", "GLICERINA", "INVIMA-008", "VIGENTE", "PUBLICADO", "UNILEVER"),
+            ("EXP-009", "VITAMINA C 1000mg", "ÁSCÓRBICO", "INVIMA-009", "VIGENTE", "PUBLICADO", "SYNTH"),
+            ("EXP-010", "CALCIO + D", "CARBONATO DE CALCIO", "INVIMA-010", "VIGENTE", "PUBLICADO", "BAYER"),
+        ]
+        conn.executemany("""
+            INSERT INTO invima (expediente, producto, principio_activo, registro, estado, modalidad, titular)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, datos_ejemplo)
     
     try:
         conn.execute("ALTER TABLE inventario ADD COLUMN fecha_vencimiento TEXT")
