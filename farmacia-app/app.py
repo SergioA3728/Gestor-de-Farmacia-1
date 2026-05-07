@@ -287,7 +287,32 @@ CATEGORIAS_KEYWORDS = {
     "miconazol": "Dermatológicos", "aceite mineral": "Dermatológicos", "urea": "Dermatológicos",
     "vitamina": "Suplementos / Vitaminas", "magnesio": "Suplementos / Vitaminas", "zinc": "Suplementos / Vitaminas",
     "hierro": "Suplementos / Vitaminas", "calcio": "Suplementos / Vitaminas", "vitamina d": "Suplementos / Vitaminas",
-    "vitamina c": "Suplementos / Vitaminas", "complejo b": "Suplementos / Vitaminas"
+    "vitamina c": "Suplementos / Vitaminas", "complejo b": "Suplementos / Vitaminas",
+    "shampoo": "Dermatológicos", "acondicionador": "Dermatológicos", "jabón": "Dermatológicos",
+    "gel de baño": "Dermatológicos", "pasta dental": "Dermatológicos", "desodorante": "Dermatológicos",
+    "antitranspirante": "Dermatológicos", "crema": "Dermatológicos", "protector solar": "Dermatológicos",
+    "bálsamo labial": "Dermatológicos", "brillo de labios": "Dermatológicos", "lápiz de labios": "Dermatológicos",
+    "base": "Dermatológicos", "rímel": "Dermatológicos", "sombra de ojos": "Dermatológicos",
+    "corrector": "Dermatológicos", "polvora": "Dermatológicos", "esmalte": "Dermatológicos",
+    "quitaesmalte": "Dermatológicos", "mascarilla": "Dermatológicos", "gel capilar": "Dermatológicos",
+    "espuma": "Dermatológicos", "cera": "Dermatológicos", "spray": "Dermatológicos",
+    "tinte": "Dermatológicos", "gel de afeitar": "Dermatológicos", "post-afeitar": "Dermatológicos",
+    "crema de manos": "Dermatológicos", "loción": "Dermatológicos", "aceite corporal": "Dermatológicos",
+    "crema facial": "Dermatológicos", "crema corporal": "Dermatológicos", "crema hidratante": "Dermatológicos",
+    "aloe": "Dermatológicos", "glicerina": "Dermatológicos", "manteca": "Dermatológicos",
+    "shea": "Dermatológicos", "coco": "Dermatológicos", "vitamina e": "Dermatológicos",
+    "colágeno": "Dermatológicos", "biotina": "Dermatológicos", "calendula": "Dermatológicos",
+    "mentol": "Dermatológicos", "aguay": "Dermatológicos",
+    "condón": "Otros", "preservativo": "Otros", "lubricante": "Otros", "espermicida": "Otros",
+    "test de embarazo": "Otros", "copa menstrual": "Otros", "toalla": "Otros", "tampón": "Otros",
+    "pañal": "Otros", "toallitas": "Otros", "gasa": "Otros", "venda": "Otros", "curita": "Otros",
+    "aposito": "Otros", "algodón": "Otros", "jeringa": "Otros", "aguja": "Otros", "guante": "Otros",
+    "mascarilla": "Otros", "alcohol": "Otros", "suero": "Otros", "yodo": "Otros", "peróxido": "Otros",
+    "termómetro": "Otros", "tensiómetro": "Otros", "glucómetro": "Otros", "tiras": "Otros",
+    "tijeras": "Otros", "pinzas": "Otros", "repele": "Otros", "bombilla": "Otros",
+    "omega": "Suplementos / Vitaminas", "colágen": "Suplementos / Vitaminas", "biotina": "Suplementos / Vitaminas",
+    "complejo b": "Suplementos / Vitaminas", "c": "Suplementos / Vitaminas", "e": "Suplementos / Vitaminas",
+    "sales": "Suplementos / Vitaminas"
 }
 
 def inferir_categoria(principio):
