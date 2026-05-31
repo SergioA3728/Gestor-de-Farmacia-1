@@ -301,17 +301,17 @@ CATEGORIAS_KEYWORDS = {
     "crema facial": "Dermatológicos", "crema corporal": "Dermatológicos", "crema hidratante": "Dermatológicos",
     "aloe": "Dermatológicos", "glicerina": "Dermatológicos", "manteca": "Dermatológicos",
     "shea": "Dermatológicos", "coco": "Dermatológicos", "vitamina e": "Dermatológicos",
-    "colágeno": "Dermatológicos", "biotina": "Dermatológicos", "calendula": "Dermatológicos",
+    "colágeno": "Dermatológicos", "calendula": "Dermatológicos",
     "mentol": "Dermatológicos", "aguay": "Dermatológicos",
     "condón": "Otros", "preservativo": "Otros", "lubricante": "Otros", "espermicida": "Otros",
     "test de embarazo": "Otros", "copa menstrual": "Otros", "toalla": "Otros", "tampón": "Otros",
     "pañal": "Otros", "toallitas": "Otros", "gasa": "Otros", "venda": "Otros", "curita": "Otros",
     "aposito": "Otros", "algodón": "Otros", "jeringa": "Otros", "aguja": "Otros", "guante": "Otros",
-    "mascarilla": "Otros", "alcohol": "Otros", "suero": "Otros", "yodo": "Otros", "peróxido": "Otros",
+    "alcohol": "Otros", "suero": "Otros", "yodo": "Otros", "peróxido": "Otros",
     "termómetro": "Otros", "tensiómetro": "Otros", "glucómetro": "Otros", "tiras": "Otros",
     "tijeras": "Otros", "pinzas": "Otros", "repele": "Otros", "bombilla": "Otros",
     "omega": "Suplementos / Vitaminas", "colágen": "Suplementos / Vitaminas", "biotina": "Suplementos / Vitaminas",
-    "complejo b": "Suplementos / Vitaminas", "c": "Suplementos / Vitaminas", "e": "Suplementos / Vitaminas",
+    "complejo b": "Suplementos / Vitaminas",
     "sales": "Suplementos / Vitaminas"
 }
 
@@ -490,8 +490,8 @@ def inventario_importar():
             "cantidad": int(row.get("cantidad", 0)),
             "precio": float(row.get("precio", 0)),
             "fecha_vencimiento": str(row.get("fecha_vencimiento", ""))[:10] if pd.notna(row.get("fecha_vencimiento")) else "",
-            "lote": str(row["lote"]) if pd.notna(row.get("lote")) else "",
-            "categoria": str(row["categoria"]) if pd.notna(row.get("categoria")) else "" or inferir_categoria(row.get("principio", "")),
+            "lote": str(row.get("lote", "")) if pd.notna(row.get("lote")) else "",
+            "categoria": str(row.get("categoria", "")) if pd.notna(row.get("categoria")) else inferir_categoria(row.get("principio", "")),
             "invima_id": invima_match["id"] if invima_match else None,
             "match": invima_match is not None
         }
@@ -899,9 +899,14 @@ def ventas_listar():
 def registrar_venta():
     d = request.json
     conn = get_db()
+    inv_id = d.get("inventario_id")
+    if not inv_id:
+        conn.close()
+        return jsonify({"ok": False, "error": "inventario_id requerido"}), 400
+
     item = conn.execute("""
         SELECT id, nombre, laboratorio, cantidad, precio FROM inventario WHERE id = ?
-    """, (d["inventario_id"],)).fetchone()
+    """, (inv_id,)).fetchone()
 
     if not item:
         conn.close()
