@@ -425,11 +425,12 @@
         </div>
         <div class="modal-body">
             <div id="importar-paso1">
+                <input type="file" id="importar-file" accept=".xlsx,.xls" style="display:none">
                 <div class="importar-dropzone" id="importar-dropzone">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="48" height="48"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                    <p>Arrastra tu archivo Excel aquí o <label for="importar-file" class="importar-browse">busca</label></p>
-                    <input type="file" id="importar-file" accept=".xlsx,.xls" style="display:none">
+                    <p>Arrastra tu archivo Excel aquí o <span class="importar-browse" id="importar-browse-btn">busca</span></p>
                 </div>
+                <p id="importar-estado" style="display:none; margin-top:12px; text-align:center; font-size:13px;"></p>
             </div>
             <div id="importar-paso2" style="display:none;">
                 <p class="importar-resumen" id="importar-resumen"></p>

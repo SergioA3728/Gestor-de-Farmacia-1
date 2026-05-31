@@ -147,10 +147,7 @@ function toggleModoOscuro() {
     const isDark = html.classList.toggle("dark");
     localStorage.setItem("darkMode", isDark);
     const toggle = $("dark-toggle");
-    if (toggle) {
-        const sw = toggle.querySelector(".toggle-switch");
-        sw.setAttribute("aria-checked", isDark);
-    }
+    if (toggle) toggle.setAttribute("aria-checked", isDark);
 }
 
 function initModoOscuro() {
@@ -158,10 +155,7 @@ function initModoOscuro() {
     if (saved) {
         document.documentElement.classList.add("dark");
         const toggle = $("dark-toggle");
-        if (toggle) {
-            const sw = toggle.querySelector(".toggle-switch");
-            sw.setAttribute("aria-checked", "true");
-        }
+        if (toggle) toggle.setAttribute("aria-checked", "true");
     }
 }
 
@@ -617,6 +611,8 @@ $("btn-importar-excel")?.addEventListener("click", () => {
     $("importar-paso1").style.display = "block";
     $("importar-paso2").style.display = "none";
     $("importar-confirmar").style.display = "none";
+    const estado = $("importar-estado");
+    if (estado) { estado.style.display = "none"; estado.textContent = ""; }
 });
 
 const modalImportar = $("modal-importar");
@@ -633,57 +629,101 @@ $("importar-cancelar")?.addEventListener("click", () => {
     $("modal-importar").style.display = "none";
 });
 
+// Clic en cualquier parte del dropzone abre el picker
 $("importar-dropzone")?.addEventListener("click", () => {
     $("importar-file").click();
 });
 
-$("importar-file")?.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    $("importar-dropzone").innerHTML = '<p>Procesando...</p>';
-    
+// El span "busca" detiene la propagación para evitar doble disparo
+$("importar-browse-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("importar-file").click();
+});
+
+// Drag & drop
+$("importar-dropzone")?.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    $("importar-dropzone").style.borderColor = "var(--accent)";
+    $("importar-dropzone").style.background = "var(--accent-light)";
+});
+
+$("importar-dropzone")?.addEventListener("dragleave", () => {
+    $("importar-dropzone").style.borderColor = "";
+    $("importar-dropzone").style.background = "";
+});
+
+$("importar-dropzone")?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    $("importar-dropzone").style.borderColor = "";
+    $("importar-dropzone").style.background = "";
+    const file = e.dataTransfer?.files?.[0];
+    if (file) procesarArchivoExcel(file);
+});
+
+async function procesarArchivoExcel(file) {
+    const estado = $("importar-estado");
+    if (estado) {
+        estado.style.display = "block";
+        estado.style.color = "var(--text-secondary)";
+        estado.textContent = "Procesando...";
+    }
+
     try {
         const formData = new FormData();
         formData.append("file", file);
-        
+
         const res = await fetch("/api/inventario/importar", { method: "POST", body: formData });
-        if (!res.ok) throw new Error("Error del servidor");
+        if (!res.ok) throw new Error("Error del servidor (" + res.status + ")");
         const data = await res.json();
-        
+
+        if (estado) { estado.style.display = "none"; estado.textContent = ""; }
+
         if (!data.ok) {
             alert(data.error || "Error al importar");
             return;
         }
-        
+
+        if (!data.preview || data.preview.length === 0) {
+            alert("No se encontraron productos. Verifica que el archivo tenga una columna 'nombre' o 'producto'.");
+            return;
+        }
+
         importPreview = data.preview;
         const matchCount = importPreview.filter(i => i.match).length;
         const noMatchCount = importPreview.length - matchCount;
-    
-    $("importar-resumen").innerHTML = `
-        <span class="importar-match">✓ ${matchCount} encontrados en INVIMA</span> · 
-        <span class="importar-no-match">⚠ ${noMatchCount} sin match</span>
-    `;
-    
-    $("importar-tabla-body").innerHTML = importPreview.map(item => `
-        <tr>
-            <td>${item.match ? '<span class="importar-match">✓</span>' : '<span class="importar-no-match">-</span>'}</td>
-            <td>${esc(item.nombre)}</td>
-            <td>${esc(item.principio || "-")}</td>
-            <td>${esc(item.laboratorio || "-")}</td>
-            <td>${item.cantidad}</td>
-            <td>${formatCOP(item.precio)}</td>
-        </tr>
-    `).join("");
-    
-    $("importar-dropzone").innerHTML = `📂 Haz clic o arrastra un archivo Excel (.xlsx)`;
-    $("importar-file").value = "";
-    $("importar-paso1").style.display = "none";
+
+        $("importar-resumen").innerHTML = `
+            <span class="importar-match">✓ ${matchCount} encontrados en INVIMA</span> · 
+            <span class="importar-no-match">⚠ ${noMatchCount} sin match</span>
+        `;
+
+        $("importar-tabla-body").innerHTML = importPreview.map(item => `
+            <tr>
+                <td>${item.match ? '<span class="importar-match">✓</span>' : '<span class="importar-no-match">-</span>'}</td>
+                <td>${esc(item.nombre)}</td>
+                <td>${esc(item.principio || "-")}</td>
+                <td>${esc(item.laboratorio || "-")}</td>
+                <td>${item.cantidad}</td>
+                <td>${formatCOP(item.precio)}</td>
+            </tr>
+        `).join("");
+
+        $("importar-file").value = "";
+        $("importar-paso1").style.display = "none";
         $("importar-paso2").style.display = "block";
         $("importar-confirmar").style.display = "inline-block";
     } catch (err) {
-        $("importar-dropzone").innerHTML = '<p style="color:var(--danger)">Error: ' + err.message + '</p>';
+        if (estado) {
+            estado.style.display = "block";
+            estado.style.color = "var(--danger)";
+            estado.textContent = "Error: " + err.message + ". Intenta de nuevo.";
+        }
     }
+}
+
+$("importar-file")?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) procesarArchivoExcel(file);
 });
 
 $("importar-confirmar")?.addEventListener("click", async () => {
@@ -693,7 +733,7 @@ $("importar-confirmar")?.addEventListener("click", async () => {
         body: JSON.stringify({ items: importPreview })
     });
     const data = await res.json();
-    
+
     if (data.ok) {
         alert(`Importación completada: ${data.insertados} nuevos, ${data.actualizados} actualizados`);
         $("modal-importar").style.display = "none";
