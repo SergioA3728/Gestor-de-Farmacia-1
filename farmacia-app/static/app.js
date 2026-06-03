@@ -4,7 +4,17 @@ function formatCOP(valor) {
     return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(valor);
 }
 
-function esc(str) {
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function escapeJs(str) {
     return (str || "").replace(/'/g, "\\'").replace(/"/g, "&quot;");
 }
 
@@ -45,9 +55,9 @@ function renderInvimaModal(datos) {
     }
     cont.style.display = "block";
     cont.innerHTML = datos.map(d => `
-        <div class="sugerencia-item" onclick="seleccionarInvima(${d.id}, '${esc(d.producto)}', '${esc(d.principio_activo)}', '${esc(d.titular)}', '${esc(d.registro)}')">
-            <div class="nombre">${d.producto}</div>
-            <div class="detalle">${d.principio_activo} · ${d.titular}</div>
+        <div class="sugerencia-item" onclick="seleccionarInvima(${d.id}, '${escapeJs(d.producto)}', '${escapeJs(d.principio_activo)}', '${escapeJs(d.titular)}', '${escapeJs(d.registro)}')">
+            <div class="nombre">${escapeHtml(d.producto)}</div>
+            <div class="detalle">${escapeHtml(d.principio_activo)} · ${escapeHtml(d.titular)}</div>
         </div>
     `).join("");
 }
@@ -214,9 +224,9 @@ async function cargarCentroAlertas() {
         if (d.tipo === "stock") {
             const nivel = d.nivel === "critico" ? "danger" : "warning";
             const label = d.nivel === "critico" ? "Crítico" : "Bajo";
-            return `<div class="alert-item"><span class="alert-badge ${nivel}">${label}</span><div class="alert-info"><div class="alert-name">${d.nombre}</div><div class="alert-detail">Stock: ${d.cantidad}</div></div></div>`;
+            return `<div class="alert-item"><span class="alert-badge ${nivel}">${label}</span><div class="alert-info"><div class="alert-name">${escapeHtml(d.nombre)}</div><div class="alert-detail">Stock: ${d.cantidad}</div></div></div>`;
         } else {
-            return `<div class="alert-item"><span class="alert-badge danger">Vence</span><div class="alert-info"><div class="alert-name">${d.nombre}</div><div class="alert-detail">${d.fecha_vencimiento}</div></div></div>`;
+            return `<div class="alert-item"><span class="alert-badge danger">Vence</span><div class="alert-info"><div class="alert-name">${escapeHtml(d.nombre)}</div><div class="alert-detail">${escapeHtml(d.fecha_vencimiento)}</div></div></div>`;
         }
     }).join("");
 }
@@ -303,7 +313,7 @@ async function cargarTopProductos() {
             <div class="top-producto-item">
                 <div class="top-producto-rank ${rankClass[i]}">${i + 1}</div>
                 <div class="top-producto-info">
-                    <div class="top-producto-nombre" title="${esc(d.nombre)}">${d.nombre}</div>
+                    <div class="top-producto-nombre" title="${escapeHtml(d.nombre)}">${escapeHtml(d.nombre)}</div>
                     <div class="top-producto-cantidad">${d.vendidos} unidades vendidas</div>
                 </div>
             </div>
@@ -383,20 +393,20 @@ function renderInventario(datos) {
     cont.innerHTML = datos.map(d => `
         <tr>
             <td>
-                <div style="font-weight:600">${d.nombre}</div>
-                <div style="font-size:12px;color:var(--text-secondary)">${d.principio || ""}</div>
+                <div style="font-weight:600">${escapeHtml(d.nombre)}</div>
+                <div style="font-size:12px;color:var(--text-secondary)">${escapeHtml(d.principio || "")}</div>
             </td>
-            <td>${d.laboratorio || "-"}</td>
-            <td>${d.categoria || "-"}</td>
+            <td>${escapeHtml(d.laboratorio || "-")}</td>
+            <td>${escapeHtml(d.categoria || "-")}</td>
             <td style="font-weight:600; color:${d.cantidad <= 5 ? 'var(--danger)' : d.cantidad <= 10 ? 'var(--warning)' : 'var(--text)'}">${d.cantidad}</td>
             <td class="precio">${formatCOP(d.precio)}</td>
             <td>${formatDate(d.fecha_vencimiento)}</td>
-            <td>${d.lote || "-"}</td>
+            <td>${escapeHtml(d.lote || "-")}</td>
             <td>
-                <button class="btn btn-icon" onclick="editarInventario(${d.id})" aria-label="Editar ${esc(d.nombre)}" title="Editar">
+                <button class="btn btn-icon" onclick="editarInventario(${d.id})" aria-label="Editar ${escapeJs(d.nombre)}" title="Editar">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
-                <button class="btn btn-icon" onclick="eliminarInventario(${d.id})" aria-label="Eliminar ${esc(d.nombre)}" title="Eliminar">
+                <button class="btn btn-icon" onclick="eliminarInventario(${d.id})" aria-label="Eliminar ${escapeJs(d.nombre)}" title="Eliminar">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                 </button>
             </td>
@@ -598,8 +608,8 @@ $("venta-buscar")?.addEventListener("input", async () => {
     cont.style.display = "block";
     cont.innerHTML = filtrados.slice(0, 10).map(d => `
         <div class="suggestion-item" onclick="seleccionarVenta(${d.id})" role="option">
-            <div style="font-weight:600">${d.nombre}</div>
-            <div style="font-size:12px;color:var(--text-secondary)">${d.laboratorio || ""} · Stock: ${d.cantidad}</div>
+            <div style="font-weight:600">${escapeHtml(d.nombre)}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">${escapeHtml(d.laboratorio || "")} · Stock: ${d.cantidad}</div>
         </div>
     `).join("");
 });
@@ -673,8 +683,8 @@ async function cargarVentas() {
     cont.innerHTML = datos.slice(0, 10).map(d => `
         <div class="venta-item">
             <div class="venta-item-info">
-                <h4>${d.nombre}</h4>
-                <p>${d.laboratorio || ""} · ${d.cantidad} unidad(es)</p>
+                <h4>${escapeHtml(d.nombre)}</h4>
+                <p>${escapeHtml(d.laboratorio || "")} · ${d.cantidad} unidad(es)</p>
             </div>
             <div class="venta-item-total">${formatCOP(d.total)}</div>
         </div>
@@ -785,9 +795,9 @@ async function procesarArchivoExcel(file) {
         $("importar-tabla-body").innerHTML = importPreview.map(item => `
             <tr>
                 <td>${item.match ? '<span class="importar-match">✓</span>' : '<span class="importar-no-match">-</span>'}</td>
-                <td>${esc(item.nombre)}</td>
-                <td>${esc(item.principio || "-")}</td>
-                <td>${esc(item.laboratorio || "-")}</td>
+                <td>${escapeHtml(item.nombre)}</td>
+                <td>${escapeHtml(item.principio || "-")}</td>
+                <td>${escapeHtml(item.laboratorio || "-")}</td>
                 <td>${item.cantidad}</td>
                 <td>${formatCOP(item.precio)}</td>
             </tr>

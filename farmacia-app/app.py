@@ -4,6 +4,12 @@ import sqlite3
 app = Flask(__name__)
 DB = "farmacia.db"
 STOCK_MINIMO = 10
+STOCK_CRITICO = 5
+DIAS_ALERTA_VENCIMIENTO = 30
+DATE_FMT = "%Y-%m-%d"
+FMT_FECHA_REPORTE = "%Y%m%d"
+FMT_MONEDA = "$#,##0"
+FMT_FECHA_EXCEL = "DD/MM/YYYY"
 
 def get_db():
     conn = sqlite3.connect(DB)
@@ -225,21 +231,21 @@ def init_db():
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, productos_comunes)
     
-    try:
-        conn.execute("ALTER TABLE inventario ADD COLUMN fecha_vencimiento TEXT")
-    except:
-        pass
-    try:
-        conn.execute("ALTER TABLE inventario ADD COLUMN lote TEXT")
-    except:
-        pass
-    try:
-        conn.execute("ALTER TABLE inventario ADD COLUMN categoria TEXT")
-    except:
-        pass
-    
+    _ensure_column(conn, "inventario", "fecha_vencimiento", "TEXT")
+    _ensure_column(conn, "inventario", "lote", "TEXT")
+    _ensure_column(conn, "inventario", "categoria", "TEXT")
+
     conn.commit()
     conn.close()
+
+
+def _ensure_column(conn, table, column, definition):
+    existe = conn.execute(
+        "SELECT 1 FROM pragma_table_info(?) WHERE name = ?",
+        (table, column)
+    ).fetchone()
+    if not existe:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 # ── INVIMA ────
 @app.route("/api/invima/buscar")
@@ -674,7 +680,7 @@ def reporte_inventario():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=f"inventario_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        download_name=f"inventario_{datetime.now().strftime(FMT_FECHA_REPORTE)}.xlsx"
     )
 
 @app.route("/api/reportes/ventas")
@@ -820,7 +826,7 @@ def reporte_utilidad():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=f"utilidad_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        download_name=f"utilidad_{datetime.now().strftime(FMT_FECHA_REPORTE)}.xlsx"
     )
 
 @app.route("/api/dashboard/alertas", methods=["GET"])
@@ -828,22 +834,22 @@ def dashboard_alertas():
     import datetime
     conn = get_db()
     
-    thirty_days = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+    fecha_limite = (datetime.datetime.now() + datetime.timedelta(days=DIAS_ALERTA_VENCIMIENTO)).strftime(DATE_FMT)
     
     bajo_stock = conn.execute("""
-        SELECT nombre, cantidad, 
-               CASE WHEN cantidad <= 5 THEN 'critico' ELSE 'bajo' END as nivel
+        SELECT nombre, cantidad,
+               CASE WHEN cantidad <= ? THEN 'critico' ELSE 'bajo' END as nivel
         FROM inventario
         WHERE cantidad <= ?
         ORDER BY cantidad ASC
-    """, (STOCK_MINIMO,)).fetchall()
+    """, (STOCK_CRITICO, STOCK_MINIMO)).fetchall()
     
     vencer = conn.execute("""
         SELECT nombre, fecha_vencimiento, cantidad
         FROM inventario
         WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= ?
         ORDER BY fecha_vencimiento ASC
-    """, (thirty_days,)).fetchall()
+    """, (fecha_limite,)).fetchall()
     
     conn.close()
     return jsonify({
@@ -866,23 +872,23 @@ def dashboard_ventas_hoy():
 def dashboard():
     import datetime
     conn = get_db()
-    
+
     total = conn.execute("SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"] or 0
     total_productos = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad > 0").fetchone()["count"]
     bajo_stock = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad <= ?", (STOCK_MINIMO,)).fetchone()["count"]
-    
-    thirty_days = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+
+    fecha_limite = (datetime.datetime.now() + datetime.timedelta(days=DIAS_ALERTA_VENCIMIENTO)).strftime(DATE_FMT)
     vencer = conn.execute("""
-        SELECT COUNT(*) as count FROM inventario 
+        SELECT COUNT(*) as count FROM inventario
         WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= ?
-    """, (thirty_days,)).fetchone()["count"]
-    
+    """, (fecha_limite,)).fetchone()["count"]
+
     ventas_mes = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total
         FROM ventas
         WHERE date(fecha) >= date('now', 'start of month')
     """).fetchone()["total"] or 0
-    
+
     conn.close()
     return jsonify({
         "total_productos": total_productos,
@@ -894,6 +900,7 @@ def dashboard():
 
 @app.route("/api/dashboard/ventas-semana", methods=["GET"])
 def dashboard_ventas_semana():
+    import datetime
     conn = get_db()
     rows = conn.execute("""
         SELECT date(fecha) as fecha, COALESCE(SUM(total), 0) as total
@@ -905,16 +912,14 @@ def dashboard_ventas_semana():
     conn.close()
     
     existentes = {r["fecha"]: r["total"] for r in rows}
-    resultado = []
-    for i in range(6, -1, -1):
-        conn = get_db()
-        dia = conn.execute("SELECT date('now', ?) as d", (f"-{i} days",)).fetchone()["d"]
-        conn.close()
-        resultado.append({
-            "fecha": dia,
-            "total": existentes.get(dia, 0)
-        })
-    return jsonify(resultado)
+    hoy = datetime.date.today()
+    return jsonify([
+        {
+            "fecha": (hoy - datetime.timedelta(days=i)).isoformat(),
+            "total": existentes.get((hoy - datetime.timedelta(days=i)).isoformat(), 0)
+        }
+        for i in range(6, -1, -1)
+    ])
 
 @app.route("/api/dashboard/top-productos", methods=["GET"])
 def dashboard_top_productos():
