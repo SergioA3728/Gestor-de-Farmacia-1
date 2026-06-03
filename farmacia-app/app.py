@@ -877,13 +877,57 @@ def dashboard():
         WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= ?
     """, (thirty_days,)).fetchone()["count"]
     
+    ventas_mes = conn.execute("""
+        SELECT COALESCE(SUM(total), 0) as total
+        FROM ventas
+        WHERE date(fecha) >= date('now', 'start of month')
+    """).fetchone()["total"] or 0
+    
     conn.close()
     return jsonify({
         "total_productos": total_productos,
         "total_unidades": total,
         "bajo_stock": bajo_stock,
-        "prox_vencer": vencer
+        "prox_vencer": vencer,
+        "ventas_mes": ventas_mes
     })
+
+@app.route("/api/dashboard/ventas-semana", methods=["GET"])
+def dashboard_ventas_semana():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT date(fecha) as fecha, COALESCE(SUM(total), 0) as total
+        FROM ventas
+        WHERE date(fecha) >= date('now', '-6 days')
+        GROUP BY date(fecha)
+        ORDER BY date(fecha) ASC
+    """).fetchall()
+    conn.close()
+    
+    existentes = {r["fecha"]: r["total"] for r in rows}
+    resultado = []
+    for i in range(6, -1, -1):
+        conn = get_db()
+        dia = conn.execute("SELECT date('now', ?) as d", (f"-{i} days",)).fetchone()["d"]
+        conn.close()
+        resultado.append({
+            "fecha": dia,
+            "total": existentes.get(dia, 0)
+        })
+    return jsonify(resultado)
+
+@app.route("/api/dashboard/top-productos", methods=["GET"])
+def dashboard_top_productos():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT nombre, SUM(cantidad) as vendidos
+        FROM ventas
+        GROUP BY nombre
+        ORDER BY vendidos DESC
+        LIMIT 5
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 # ── VENTAS ───────────────────────────────────────────────
 @app.route("/api/ventas", methods=["GET"])

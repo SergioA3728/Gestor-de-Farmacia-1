@@ -177,6 +177,7 @@ async function cargarDashboard() {
     $("stat-total").textContent = data.total_productos || 0;
     $("stat-bajo-stock").textContent = data.bajo_stock || 0;
     $("stat-vencer").textContent = data.prox_vencer || 0;
+    $("stat-ventas-mes").textContent = formatCOP(data.ventas_mes || 0);
     
     const hora = new Date().getHours();
     const saludo = hora < 12 ? "Buenos días" : hora < 18 ? "Buenas tardes" : "Buenas noches";
@@ -188,6 +189,8 @@ async function cargarDashboard() {
     
     cargarCentroAlertas();
     cargarVentasHoy();
+    cargarGraficaSemana();
+    cargarTopProductos();
 }
 
 async function cargarCentroAlertas() {
@@ -229,6 +232,88 @@ async function cargarVentasHoy() {
     }
     
     cont.innerHTML = `<div style="text-align:center;padding:16px 0"><div style="font-size:2rem;font-weight:700;color:var(--success)">${formatCOP(data.total)}</div><div style="font-size:13px;color:var(--text-secondary)">${data.transacciones} transacciones</div></div>`;
+}
+
+async function cargarGraficaSemana() {
+    const cont = $("dashboard-chart");
+    if (!cont) return;
+    
+    try {
+        const res = await fetch("/api/dashboard/ventas-semana");
+        const datos = await res.json();
+        
+        if (!datos || datos.length === 0) {
+            cont.innerHTML = `<div class="empty-state"><p>Sin datos de ventas</p></div>`;
+            return;
+        }
+        
+        const maxValor = Math.max(...datos.map(d => d.total), 1);
+        const diasCortos = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+        
+        const formatearCorto = (n) => {
+            if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(1) + "M";
+            if (n >= 1_000) return "$" + (n / 1_000).toFixed(0) + "K";
+            return "$" + n.toFixed(0);
+        };
+        
+        const formatearLabel = (fechaStr) => {
+            const f = new Date(fechaStr + "T00:00:00");
+            return diasCortos[f.getDay()];
+        };
+        
+        cont.innerHTML = datos.map(d => {
+            const alturaPct = maxValor > 0 ? (d.total / maxValor) * 100 : 0;
+            const esCero = d.total === 0;
+            return `
+                <div class="chart-bar-wrapper">
+                    <div class="chart-bar">
+                        <div class="chart-bar-fill ${esCero ? "zero" : ""}" 
+                             data-value="${formatearCorto(d.total)}"
+                             style="height: ${Math.max(alturaPct, 2)}%"></div>
+                    </div>
+                    <div class="chart-label">${formatearLabel(d.fecha)}</div>
+                </div>
+            `;
+        }).join("");
+    } catch (err) {
+        cont.innerHTML = `<div class="empty-state"><p>Error al cargar gráfica</p></div>`;
+    }
+}
+
+async function cargarTopProductos() {
+    const cont = $("top-productos-container");
+    if (!cont) return;
+    
+    try {
+        const res = await fetch("/api/dashboard/top-productos");
+        const datos = await res.json();
+        
+        if (!datos || datos.length === 0) {
+            cont.innerHTML = `
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <p>Sin ventas registradas</p>
+                </div>`;
+            return;
+        }
+        
+        const rankClass = ["gold", "silver", "bronze", "", ""];
+        
+        cont.innerHTML = datos.map((d, i) => `
+            <div class="top-producto-item">
+                <div class="top-producto-rank ${rankClass[i]}">${i + 1}</div>
+                <div class="top-producto-info">
+                    <div class="top-producto-nombre" title="${esc(d.nombre)}">${d.nombre}</div>
+                    <div class="top-producto-cantidad">${d.vendidos} unidades vendidas</div>
+                </div>
+            </div>
+        `).join("");
+    } catch (err) {
+        cont.innerHTML = `
+            <div class="empty-state">
+                <p>Error al cargar</p>
+            </div>`;
+    }
 }
 
 // ── INVENTARIO ───────────────────────────────────────────────
