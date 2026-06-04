@@ -10,6 +10,18 @@ DATE_FMT = "%Y-%m-%d"
 FMT_FECHA_REPORTE = "%Y%m%d"
 FMT_MONEDA = "$#,##0"
 FMT_FECHA_EXCEL = "DD/MM/YYYY"
+PREMIUM_ENABLED = False
+
+MARGEN_POR_CATEGORIA = {
+    "Analgésicos / Antiinflamatorios": 0.30,
+    "Antibióticos": 0.25,
+    "Antialérgicos": 0.35,
+    "Antidiabéticos / Antihipertensivos": 0.22,
+    "Gastrointestinal": 0.32,
+    "Dermatológicos": 0.45,
+    "Suplementos / Vitaminas": 0.40,
+    "Otros": 0.28,
+}
 
 def get_db():
     conn = sqlite3.connect(DB)
@@ -980,10 +992,162 @@ def registrar_venta():
     conn.close()
     return jsonify({"ok": True, "total": total})
 
+# ── ANALÍTICAS (PREMIUM) ───────────────────────────────────
+def _premium_required():
+    if not PREMIUM_ENABLED:
+        return jsonify({"ok": False, "premium_required": True, "error": "Función premium"}), 403
+    return None
+
+
+def _variacion_pct(actual, anterior):
+    if not anterior:
+        return None
+    return round(((actual - anterior) / anterior) * 100, 1)
+
+
+@app.route("/api/analytics/comparativa", methods=["GET"])
+def analytics_comparativa():
+    if err := _premium_required():
+        return err
+    conn = get_db()
+    actual = conn.execute("""
+        SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
+        FROM ventas
+        WHERE date(fecha) >= date('now', 'start of month')
+    """).fetchone()
+    anterior = conn.execute("""
+        SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
+        FROM ventas
+        WHERE date(fecha) >= date('now', 'start of month', '-1 month')
+          AND date(fecha) <  date('now', 'start of month')
+    """).fetchone()
+    conn.close()
+    a_total, a_tx = actual["total"] or 0, actual["transacciones"] or 0
+    b_total, b_tx = anterior["total"] or 0, anterior["transacciones"] or 0
+    return jsonify({
+        "actual": {"total": a_total, "transacciones": a_tx, "ticket_promedio": (a_total / a_tx) if a_tx else 0},
+        "anterior": {"total": b_total, "transacciones": b_tx, "ticket_promedio": (b_total / b_tx) if b_tx else 0},
+        "variacion_total_pct": _variacion_pct(a_total, b_total),
+        "variacion_transacciones_pct": _variacion_pct(a_tx, b_tx),
+    })
+
+
+@app.route("/api/analytics/rotacion", methods=["GET"])
+def analytics_rotacion():
+    if err := _premium_required():
+        return err
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT i.nombre,
+               i.cantidad as stock,
+               COALESCE(SUM(v.cantidad), 0) as vendidos,
+               CASE WHEN i.cantidad > 0
+                    THEN CAST(COALESCE(SUM(v.cantidad), 0) AS REAL) / i.cantidad
+                    ELSE 0 END as rotacion
+        FROM inventario i
+        LEFT JOIN ventas v ON v.inventario_id = i.id
+        WHERE i.cantidad > 0
+        GROUP BY i.id
+        ORDER BY rotacion DESC
+        LIMIT 10
+    """).fetchall()
+    conn.close()
+    return jsonify({"productos": [dict(r) for r in rows]})
+
+
+@app.route("/api/analytics/rentabilidad", methods=["GET"])
+def analytics_rentabilidad():
+    if err := _premium_required():
+        return err
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT i.categoria, COALESCE(SUM(v.total), 0) as ventas
+        FROM ventas v
+        JOIN inventario i ON v.inventario_id = i.id
+        WHERE i.categoria IS NOT NULL AND i.categoria != ''
+        GROUP BY i.categoria
+        ORDER BY ventas DESC
+    """).fetchall()
+    conn.close()
+    resultado = []
+    for r in rows:
+        margen = MARGEN_POR_CATEGORIA.get(r["categoria"], 0.30)
+        ventas = r["ventas"] or 0
+        resultado.append({
+            "categoria": r["categoria"],
+            "ventas": ventas,
+            "utilidad": ventas * margen,
+            "margen_pct": round(margen * 100, 1),
+        })
+    return jsonify({"categorias": resultado})
+
+
+@app.route("/api/analytics/margen", methods=["GET"])
+def analytics_margen():
+    if err := _premium_required():
+        return err
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT i.categoria, COALESCE(SUM(v.total), 0) as ventas
+        FROM ventas v
+        JOIN inventario i ON v.inventario_id = i.id
+        WHERE i.categoria IS NOT NULL AND i.categoria != ''
+        GROUP BY i.categoria
+    """).fetchall()
+    conn.close()
+    total_ventas = 0
+    total_utilidad = 0
+    for r in rows:
+        margen = MARGEN_POR_CATEGORIA.get(r["categoria"], 0.30)
+        v = r["ventas"] or 0
+        total_ventas += v
+        total_utilidad += v * margen
+    margen_pct = round((total_utilidad / total_ventas) * 100, 1) if total_ventas else 0
+    return jsonify({
+        "total_ventas": total_ventas,
+        "total_utilidad": total_utilidad,
+        "margen_pct": margen_pct,
+    })
+
+
+@app.route("/api/analytics/proyeccion", methods=["GET"])
+def analytics_proyeccion():
+    import datetime
+    if err := _premium_required():
+        return err
+    hoy = datetime.date.today()
+    if hoy.month == 12:
+        fin_mes = hoy.replace(day=31)
+    else:
+        fin_mes = (hoy.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+    dias_transcurridos = hoy.day
+    dias_totales = fin_mes.day
+    dias_restantes = (fin_mes - hoy).days
+
+    conn = get_db()
+    ventas_mes = conn.execute("""
+        SELECT COALESCE(SUM(total), 0) as total
+        FROM ventas
+        WHERE date(fecha) >= date('now', 'start of month')
+    """).fetchone()["total"] or 0
+    conn.close()
+
+    promedio_diario = ventas_mes / dias_transcurridos if dias_transcurridos > 0 else 0
+    proyeccion = promedio_diario * dias_totales
+    return jsonify({
+        "ventas_mes_actual": ventas_mes,
+        "dias_transcurridos": dias_transcurridos,
+        "dias_restantes": dias_restantes,
+        "dias_totales": dias_totales,
+        "promedio_diario": promedio_diario,
+        "proyeccion": proyeccion,
+    })
+
+
 # ── PÁGINA PRINCIPAL ─────────────────────────────────────
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", premium_enabled=PREMIUM_ENABLED)
 
 if __name__ == "__main__":
     import os

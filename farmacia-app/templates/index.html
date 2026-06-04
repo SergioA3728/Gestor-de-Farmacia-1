@@ -82,6 +82,15 @@
                 Exportar reportes
             </button>
         </div>
+        
+        <div class="nav-section">
+            <div class="nav-section-title">Premium</div>
+            <button class="nav-item" data-page="analiticas" aria-selected="false" role="tab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                Analíticas
+                <span class="premium-pill">PRO</span>
+            </button>
+        </div>
     </nav>
     
     <div class="sidebar-footer">
@@ -311,6 +320,81 @@
             </div>
         </section>
         
+        <!-- Analíticas (Premium) -->
+        <section id="page-analiticas" class="page" role="tabpanel" aria-labelledby="analiticas-title">
+            <div class="topbar">
+                <div class="topbar-left">
+                    <h1 id="analiticas-title">Analíticas</h1>
+                    <span class="premium-badge">PREMIUM</span>
+                </div>
+            </div>
+            
+            <div id="analiticas-locked" class="premium-locked">
+                <div class="premium-locked-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="48" height="48"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                </div>
+                <h2>Analíticas avanzadas</h2>
+                <p>Compara meses, proyecta ventas, mide rotación de inventario y conoce la rentabilidad por categoría.</p>
+                <ul class="premium-features">
+                    <li>Comparativa mes actual vs anterior</li>
+                    <li>Rotación de inventario por producto</li>
+                    <li>Productos más rentables por categoría</li>
+                    <li>Margen bruto estimado</li>
+                    <li>Proyección de cierre del mes</li>
+                </ul>
+                <button class="btn btn-premium" id="btn-activar-premium">Activar Premium</button>
+            </div>
+            
+            <div id="analiticas-content" style="display:none;">
+                <div class="analytics-grid">
+                    <div class="analytics-card" id="card-comparativa">
+                        <div class="analytics-card-header">
+                            <h3>Comparativa mensual</h3>
+                        </div>
+                        <div class="analytics-card-body" id="comparativa-body">
+                            <div class="empty-state"><p>Cargando...</p></div>
+                        </div>
+                    </div>
+                    
+                    <div class="analytics-card" id="card-proyeccion">
+                        <div class="analytics-card-header">
+                            <h3>Proyección del mes</h3>
+                        </div>
+                        <div class="analytics-card-body" id="proyeccion-body">
+                            <div class="empty-state"><p>Cargando...</p></div>
+                        </div>
+                    </div>
+                    
+                    <div class="analytics-card" id="card-margen">
+                        <div class="analytics-card-header">
+                            <h3>Margen bruto estimado</h3>
+                        </div>
+                        <div class="analytics-card-body" id="margen-body">
+                            <div class="empty-state"><p>Cargando...</p></div>
+                        </div>
+                    </div>
+                    
+                    <div class="analytics-card analytics-card-wide" id="card-rotacion">
+                        <div class="analytics-card-header">
+                            <h3>Rotación de inventario</h3>
+                        </div>
+                        <div class="analytics-card-body" id="rotacion-body">
+                            <div class="empty-state"><p>Cargando...</p></div>
+                        </div>
+                    </div>
+                    
+                    <div class="analytics-card analytics-card-wide" id="card-rentabilidad">
+                        <div class="analytics-card-header">
+                            <h3>Productos más rentables</h3>
+                        </div>
+                        <div class="analytics-card-body" id="rentabilidad-body">
+                            <div class="empty-state"><p>Cargando...</p></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
         <!-- Reportes -->
         <section id="page-reportes" class="page" role="tabpanel" aria-labelledby="reportes-title">
             <div class="topbar">
@@ -442,6 +526,41 @@
     </div>
 </div>
 
+<!-- Modal premium -->
+<div id="modal-premium" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="premium-title">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-premium">
+        <div class="modal-header">
+            <h2 id="premium-title">Actualizar a Premium</h2>
+            <button class="modal-close" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body premium-modal-body">
+            <div class="premium-hero">
+                <div class="premium-hero-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="40" height="40"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <h3>Desbloquea Analíticas Premium</h3>
+                <p>Toma decisiones con datos: ventas, márgenes, rotación y proyecciones.</p>
+            </div>
+            <ul class="premium-modal-features">
+                <li><strong>Comparativa mensual</strong> — actual vs anterior con variación %</li>
+                <li><strong>Rotación de inventario</strong> — qué productos se venden más rápido</li>
+                <li><strong>Productos más rentables</strong> — utilidad por categoría</li>
+                <li><strong>Margen bruto</strong> — % estimado sobre el total vendido</li>
+                <li><strong>Proyección del mes</strong> — cierre estimado según el ritmo actual</li>
+            </ul>
+            <div class="premium-modal-pricing">
+                <div class="price-tag">$29.900 <span>/ mes</span></div>
+                <p class="price-note">Cancela cuando quieras. Sin permanencia.</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="premium-cerrar">Más tarde</button>
+            <button class="btn btn-premium" id="premium-activar">Activar ahora</button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal importación -->
 <div id="modal-importar" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="importar-title">
     <div class="modal-overlay"></div>
@@ -486,5 +605,8 @@
 </div>
 
 <script src="/static/app.js"></script>
+<script>
+    window.PREMIUM_ENABLED = {{ 'true' if premium_enabled else 'false' }};
+</script>
 </body>
 </html>

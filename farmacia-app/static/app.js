@@ -136,6 +136,7 @@ function navigate(page) {
     if (page === "dashboard") cargarDashboard();
     if (page === "inventario") cargarInventario();
     if (page === "ventas") { cargarInventarioVentas(); cargarVentas(); }
+    if (page === "analiticas") cargarAnaliticas();
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
@@ -858,8 +859,184 @@ async function descargarReporte(tipo) {
     window.location.href = url;
 }
 
-// ── INIT ───────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-    initModoOscuro();
-    cargarDashboard();
+// ── ANALÍTICAS (PREMIUM) ──────────────────────────────────────
+function cargarAnaliticas() {
+    const locked = $("analiticas-locked");
+    const content = $("analiticas-content");
+
+    if (window.PREMIUM_ENABLED) {
+        locked.style.display = "none";
+        content.style.display = "block";
+        cargarComparativa();
+        cargarProyeccion();
+        cargarMargen();
+        cargarRotacion();
+        cargarRentabilidad();
+    } else {
+        locked.style.display = "block";
+        content.style.display = "none";
+    }
+}
+
+async function cargarComparativa() {
+    const body = $("comparativa-body");
+    if (!body) return;
+    const data = await fetchJSON("/api/analytics/comparativa");
+    if (!data) return;
+
+    const variacion = data.variacion_total_pct;
+    const variacionClass = variacion == null ? "neutral" : variacion > 0 ? "up" : variacion < 0 ? "down" : "neutral";
+    const variacionSign = variacion == null ? "—" : variacion > 0 ? "▲" : variacion < 0 ? "▼" : "—";
+    const variacionText = variacion == null ? "Sin datos del mes anterior" : `${variacionSign} ${Math.abs(variacion)}% vs mes anterior`;
+
+    body.innerHTML = `
+        <div class="comparativa-grid">
+            <div class="comparativa-col">
+                <div class="comparativa-label">Este mes</div>
+                <div class="comparativa-value">${formatCOP(data.actual.total)}</div>
+                <div class="comparativa-meta">${data.actual.transacciones} ventas</div>
+            </div>
+            <div class="comparativa-col">
+                <div class="comparativa-label">Mes anterior</div>
+                <div class="comparativa-value">${formatCOP(data.anterior.total)}</div>
+                <div class="comparativa-meta">${data.anterior.transacciones} ventas</div>
+            </div>
+        </div>
+        <div class="variacion ${variacionClass}">${variacionText}</div>
+    `;
+}
+
+async function cargarProyeccion() {
+    const body = $("proyeccion-body");
+    if (!body) return;
+    const data = await fetchJSON("/api/analytics/proyeccion");
+    if (!data) return;
+
+    const avancePct = data.dias_totales > 0 ? (data.dias_transcurridos / data.dias_totales) * 100 : 0;
+
+    body.innerHTML = `
+        <div class="proyeccion-amount">
+            <div class="proyeccion-amount-value">${formatCOP(data.proyeccion)}</div>
+            <div class="proyeccion-amount-label">Proyección cierre de mes</div>
+        </div>
+        <div class="proyeccion-progress">
+            <div class="proyeccion-progress-fill" style="width: ${avancePct.toFixed(0)}%"></div>
+        </div>
+        <div class="proyeccion-meta">
+            <span>Día ${data.dias_transcurridos} de ${data.dias_totales}</span>
+            <span>Faltan ${data.dias_restantes} días</span>
+        </div>
+        <div class="proyeccion-meta" style="margin-top: 8px;">
+            <span>Promedio diario: ${formatCOP(data.promedio_diario)}</span>
+        </div>
+    `;
+}
+
+async function cargarMargen() {
+    const body = $("margen-body");
+    if (!body) return;
+    const data = await fetchJSON("/api/analytics/margen");
+    if (!data) return;
+
+    body.innerHTML = `
+        <div class="margen-hero">
+            <div class="margen-pct">${data.margen_pct.toFixed(1)}%</div>
+            <div class="margen-pct-label">Margen bruto</div>
+        </div>
+        <div class="margen-breakdown">
+            <div class="margen-breakdown-item">
+                <div class="margen-breakdown-label">Ventas</div>
+                <div class="margen-breakdown-value">${formatCOP(data.total_ventas)}</div>
+            </div>
+            <div class="margen-breakdown-item">
+                <div class="margen-breakdown-label">Utilidad</div>
+                <div class="margen-breakdown-value" style="color: var(--success)">${formatCOP(data.total_utilidad)}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function cargarRotacion() {
+    const body = $("rotacion-body");
+    if (!body) return;
+    const data = await fetchJSON("/api/analytics/rotacion");
+    if (!data) return;
+
+    if (!data.productos.length) {
+        body.innerHTML = `<div class="empty-state"><p>Sin datos aún</p></div>`;
+        return;
+    }
+
+    const rankClass = ["gold", "silver", "bronze", "", "", "", "", "", "", ""];
+    body.innerHTML = data.productos.map((p, i) => `
+        <div class="analytics-list-item">
+            <div class="analytics-list-rank ${rankClass[i]}">${i + 1}</div>
+            <div class="analytics-list-info">
+                <div class="analytics-list-name">${escapeHtml(p.nombre)}</div>
+                <div class="analytics-list-meta">Stock: ${p.stock} · Vendidos: ${p.vendidos}</div>
+            </div>
+            <div class="analytics-list-value">${p.rotacion.toFixed(2)}x</div>
+        </div>
+    `).join("");
+}
+
+async function cargarRentabilidad() {
+    const body = $("rentabilidad-body");
+    if (!body) return;
+    const data = await fetchJSON("/api/analytics/rentabilidad");
+    if (!data) return;
+
+    if (!data.categorias.length) {
+        body.innerHTML = `<div class="empty-state"><p>Sin ventas con categoría</p></div>`;
+        return;
+    }
+
+    body.innerHTML = data.categorias.map(c => `
+        <div class="analytics-list-item">
+            <div class="analytics-list-info">
+                <div class="analytics-list-name">${escapeHtml(c.categoria)}</div>
+                <div class="analytics-list-meta">Ventas: ${formatCOP(c.ventas)} · Margen: ${c.margen_pct}%</div>
+            </div>
+            <div class="analytics-list-value">${formatCOP(c.utilidad)}</div>
+        </div>
+    `).join("");
+}
+
+async function fetchJSON(url) {
+    try {
+        const res = await fetch(url);
+        if (res.status === 403) {
+            const data = await res.json();
+            if (data.premium_required) {
+                mostrarModalPremium();
+                return null;
+            }
+        }
+        if (!res.ok) {
+            return null;
+        }
+        return await res.json();
+    } catch (err) {
+        return null;
+    }
+}
+
+function mostrarModalPremium() {
+    const modal = $("modal-premium");
+    if (modal) modal.style.display = "flex";
+}
+
+function cerrarModalPremium() {
+    const modal = $("modal-premium");
+    if (modal) modal.style.display = "none";
+}
+
+$("modal-premium")?.querySelector(".modal-close")?.addEventListener("click", cerrarModalPremium);
+$("modal-premium")?.querySelector(".modal-overlay")?.addEventListener("click", cerrarModalPremium);
+$("premium-cerrar")?.addEventListener("click", cerrarModalPremium);
+$("premium-activar")?.addEventListener("click", () => {
+    alert("Función de pago aún no implementada. Contacta al administrador para activar Premium.");
+    cerrarModalPremium();
 });
+$("btn-activar-premium")?.addEventListener("click", mostrarModalPremium);
+
