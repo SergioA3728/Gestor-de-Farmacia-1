@@ -1,25 +1,45 @@
 # Gestor Farmacia - Contexto del Proyecto
 
+> **Última actualización:** 2026-06-03 (sesión 3)
+> **Estado:** producción local. Premium = OFF.
+> Para revisar cambios de la última sesión: `docs/INFORME_SESION.md`.
+
 ## Información General
-- **Nombre**: FarmaVida - Gestor de Farmacia
+- **Nombre**: FarmaSys - Gestor de Farmacia
 - **Tipo**: Aplicación web Flask
 - **Ubicación**: C:\Users\sergi\Desktop\Gestor farmacia\farmacia-app
+- **Sesiones de cambios**: ver `docs/INFORME_SESION.md` después de cada sesión
 
 ## Stack Tecnológico
 - **Backend**: Python + Flask + SQLite + Pandas + OpenPyXL
 - **Frontend**: HTML + CSS vanilla + JavaScript vanilla
 - **Sin frameworks** (ni React, ni Vue)
+- **AI Assistants**: skill `clean-code` activa en `.agents/skills/clean-code/SKILL.md`
 
 ## Estructura de Archivos
 ```
 farmacia-app/
-├── app.py              # Backend Flask - rutas API + página principal
-├── farmacia.db        # Base de datos SQLite
+├── app.py                 # Backend Flask - rutas API + página principal
+├── farmacia.db            # Base de datos SQLite
+├── CONTEXT.md             # Este archivo
+├── docs/
+│   └── INFORME_SESION.md  # Informe educativo de cada sesión
 ├── templates/
-│   └── index.html    # Frontend principal
-└── static/
-    ├── style.css    # Estilos CSS con dark mode (V2 redesign)
-    └── app.js      # Lógica JavaScript
+│   └── index.html         # Frontend principal
+├── static/
+│   ├── style.css          # Estilos CSS con dark mode (V2 redesign)
+│   └── app.js             # Lógica JavaScript
+└── .agents/
+    └── skills/
+        ├── clean-code/         # Software Crafter Experto
+        ├── accessibility/      # WCAG 2.2
+        ├── flask-api-development/
+        ├── frontend-design/
+        ├── pandas-pro/
+        ├── python-executor/
+        ├── python-testing-patterns/
+        ├── seo/
+        └── ...
 ```
 
 ## Base de Datos (SQLite)
@@ -28,86 +48,103 @@ farmacia-app/
 1. **inventario**: id, nombre, principio, laboratorio, cantidad, precio, fecha_vencimiento, lote, categoria, invima_id
 2. **ventas**: id, inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha
 3. **invima**: datos de productos INVIMA para autocompletar
+4. **catalogo**: id, nombre, principio, laboratorio, descripcion
 
-### Constantes:
-- STOCK_MINIMO = 10
+### Constantes (app.py):
+- `STOCK_MINIMO = 10`
+- `STOCK_CRITICO = 5`
+- `DIAS_ALERTA_VENCIMIENTO = 30`
+- `DATE_FMT = "%Y-%m-%d"`
+- `FMT_FECHA_REPORTE = "%Y%m%d"`
+- `PREMIUM_ENABLED = False` ← controla acceso al módulo analíticas
+- `MARGEN_POR_CATEGORIA` ← diccionario de márgenes para analítica
 
 ## Rutas API
 
+### Dashboard
 | endpoint | método | descripción |
 |----------|--------|-------------|
-| `/api/dashboard` | GET | Stats: total productos, bajo stock, próximos a vencer |
-| `/api/dashboard/alertas` | GET | Lista productos bajo stock + próximos a vencer (30 días) |
-| `/api/dashboard/ventas-hoy` | GET | Total vendido hoy + número de transacciones |
-| `/api/inventario` | GET/POST | Listar / agregar productos |
-| `/api/inventario/<id>` | DELETE | Eliminar producto |
-| `/api/inventario/<id>` | PUT | Actualizar producto |
-| `/api/ventas` | GET/POST | Listar / registrar ventas |
-| `/api/invima/buscar` | GET | Buscar productos en INVIMA |
-| `/api/inferir-categoria` | GET | Infiere categoría según principio activo |
-| `/api/categorias` | GET | Lista de categorías predefinidas |
-| `/api/reportes/inventario` | GET | Exporta Excel de inventario |
-| `/api/reportes/ventas` | GET | Exporta Excel de ventas |
+| `/api/dashboard` | GET | Stats (incluye `ventas_mes`) |
+| `/api/dashboard/alertas` | GET | Bajo stock + próximos a vencer |
+| `/api/dashboard/ventas-hoy` | GET | Total + transacciones de hoy |
+| `/api/dashboard/ventas-semana` | GET | **Nuevo** — ventas por día, últimos 7 |
+| `/api/dashboard/top-productos` | GET | **Nuevo** — top 5 más vendidos |
+
+### Inventario
+| endpoint | método | descripción |
+|----------|--------|-------------|
+| `/api/inventario` | GET/POST | Listar / agregar |
+| `/api/inventario/<id>` | DELETE/PUT | Eliminar / actualizar |
 | `/api/inventario/importar` | POST | Preview importación Excel |
-| `/api/inventario/confirmar-importacion` | POST | Confirma importación |
+| `/api/inventario/confirmar-importacion` | POST | Confirmar |
+| `/api/inventario/recategorizar` | POST | Recategorizar sin categoría |
 
-## UI/UX (V2 - Nuevo Diseño)
+### Analíticas (PREMIUM — devuelve 403 si `PREMIUM_ENABLED = False`)
+| endpoint | método | descripción |
+|----------|--------|-------------|
+| `/api/analytics/comparativa` | GET | Mes actual vs anterior + variación % |
+| `/api/analytics/rotacion` | GET | Top 10 productos por ratio ventas/stock |
+| `/api/analytics/rentabilidad` | GET | Categorías ordenadas por utilidad |
+| `/api/analytics/margen` | GET | Margen bruto global estimado |
+| `/api/analytics/proyeccion` | GET | Cierre de mes según promedio diario |
 
-### Paleta de Colores:
-- **Primario**: Coral (#e11d48)
-- **Acento**: Teal (#0d9488)
-- **Background**: Cream (#fafaf9) con patrón de puntos sutil
-- **Modo oscuro**: Rich dark (#0c0a09)
+### Ventas / Reportes / INVIMA
+| endpoint | método | descripción |
+|----------|--------|-------------|
+| `/api/ventas` | GET/POST | Listar / registrar |
+| `/api/reportes/inventario` | GET | Excel de inventario |
+| `/api/reportes/ventas` | GET | Excel de ventas (con filtros desde/hasta) |
+| `/api/reportes/utilidad` | GET | Excel de utilidad |
+| `/api/invima/buscar` | GET | Buscar en INVIMA |
+| `/api/inferir-categoria` | GET | Infiere categoría según principio |
+| `/api/categorias` | GET | Lista de categorías predefinidas |
+| `/api/catalogo` | GET/POST | Catálogo propio |
 
-### Dashboard:
-- Saludo dinámico según hora (Buenos días/tardes/noches)
-- Fecha como badge
-- Quick actions: Nueva venta, Agregar producto, Exportar reporte
-- Stats cards con barras de color (green/yellow/red)
-- Centro de alertas con items clickeables
-- Ventas de hoy con diseño mejorado
+## UI/UX (V2)
+
+### Paleta:
+- **Primario**: Coral `#e11d48`
+- **Acento**: Teal `#0d9488`
+- **Background**: Cream `#fafaf9`
+- **Modo oscuro**: Rich dark `#0c0a09`
+
+### Páginas:
+- **Dashboard** — 4 stat cards + gráfica semanal + cards de alertas/ventas-hoy/top-productos
+- **Inventario** — tabla con filtros + importar Excel + INVIMA autocomplete
+- **Ventas** — formulario + historial
+- **Reportes** — 3 tipos de exportación Excel
+- **Analíticas (Premium)** — 5 cards de análisis. Si `PREMIUM_ENABLED = False` muestra CTA de upgrade
+
+### Sidebar:
+- Principal: Dashboard / Inventario / Ventas
+- Reportes: Exportar reportes
+- Premium: Analíticas (con badge PRO)
 
 ### Categorías de Productos (8):
-1. Analgésicos / Antiinflamatorios
-2. Antibióticos
-3. Antialérgicos
-4. Antidiabéticos / Antihipertensivos
-5. Gastrointestinal
-6. Dermatológicos
-7. Suplementos / Vitaminas
-8. Otros
+Analgésicos / Antibióticos / Antialérgicos / Antidiabéticos / Gastrointestinal / Dermatológicos / Suplementos / Otros
 
 ### Inferencia de Categoría:
-- Keywords en `CATEGORIAS_KEYWORDS` mapean palabras clave del principio activo a categorías
-- Se aplica automáticamente al agregar o importar productos
+- `CATEGORIAS_KEYWORDS` mapea palabras clave del principio activo a categorías
+- Se aplica al agregar o importar productos
 
-### Presentación de Productos:
-- Campo cantidad directa al editar (inv-cantidad-directa)
-- Grupo presentación (presentación + unidades por presentación) al crear nuevo
-- Total calculado en tiempo real
+### JavaScript — funciones principales:
+- **Navegación**: `navigate(page)` (SPA)
+- **Dashboard**: `cargarDashboard()`, `cargarCentroAlertas()`, `cargarVentasHoy()`, `cargarGraficaSemana()`, `cargarTopProductos()`
+- **Inventario**: `cargarInventario()`, `renderInventario()`, `eliminarInventario()`, `editarInventario()`
+- **Ventas**: `cargarVentas()`, `seleccionarVenta()`
+- **Analíticas**: `cargarAnaliticas()` (dispatch) + 5 loaders individuales
+- **Modal premium**: `mostrarModalPremium()` / `cerrarModalPremium()`
+- **Seguridad**: `escapeHtml()` + `escapeJs()` (XSS-safe)
+- **HTTP**: `fetchJSON()` wrapper centralizado
 
-### Reportes Excel:
-- Encabezados con fondo azul (#4472C4), texto blanco, negrita
-- Columnas renombradas a español
-- Formato por tipo: moneda COP, fechas DD/MM/YYYY
-- Filas alternas en gris claro
-- Color condicional en alertas: CRÍTICO (rojo), BAJO (amarillo), OK (verde)
-- Totales al final
+## Decisiones de Diseño Actuales
 
-### JavaScript:
-- Navegación SPA: `navigate(page)`
-- Dark mode: `toggleModoOscuro()`, `initModoOscuro()`
-- Dashboard: `cargarDashboard()`, `cargarCentroAlertas()`, `cargarVentasHoy()`, saludo dinámico
-- INVIMA: `buscarInvimaModal()`, `seleccionarInvima()`, fetch a `/api/inferir-categoria`
-- Inventario: `cargarInventario()`, `renderInventario()`, `eliminarInventario()`, `editarInventario()`
-- Presentación: `actualizarTotalCalculado()`
-- Ventas: `cargarVentas()`, `seleccionarVenta()`
-
-### Known Issues / Pendientes:
-- Revisar consistencia de todos los estilos CSS
-- Verificar que las stat cards de alerta navegan correctamente al inventario con filtro
-- Revisar que el modal de importar funciona correctamente
-- Testing general de todos los flujos
+1. **`PREMIUM_ENABLED = False`** — el módulo analíticas existe pero está bloqueado. Para activarlo: cambiar el flag en `app.py` y reiniciar.
+2. **5 endpoints de analítica** (no 4) — uno por análisis, SRP.
+3. **Gráfica con CSS puro** — sin librerías JS externas.
+4. **Catálogo hardcoded de INVIMA** — 158 productos comunes sembrados en `init_db()`.
+5. **No hay tests automatizados** — verificado manualmente con Flask test client.
+6. **No hay sistema de autenticación** — single user, local-only.
 
 ## Cómo Ejecutar
 
@@ -117,22 +154,26 @@ pip install flask pandas openpyxl
 python app.py
 ```
 
-Luego abrir en el navegador: http://127.0.0.1:5000
+Luego abrir: http://127.0.0.1:5000
 
-## Errores Comunes y Soluciones
+## Errores Comunes
 
-1. **ModuleNotFoundError: No module named 'flask'**
-   - Solución: `pip install flask pandas openpyxl`
+1. **`ModuleNotFoundError: No module named 'flask'`** → `pip install flask pandas openpyxl`
+2. **`sqlite3.OperationalError: no such table: inventario`** → borrar `farmacia.db` y reiniciar
 
-2. **sqlite3.OperationalError: no such table: inventario**
-   - Solución: Eliminar `farmacia.db` y reiniciar para recrear tablas con `init_db()`
+## Próximos Pasos / Ideas (no implementadas)
+
+- [ ] Integrar pasarela de pago real (Wompi / Mercado Pago) para activar Premium
+- [ ] Agregar exportación de analíticas a PDF
+- [ ] Tests automatizados (pytest + Flask test client)
+- [ ] Gráficas más elaboradas (Chart.js) si el volumen de datos crece
+- [ ] Sistema de autenticación multi-usuario
+- [ ] Caché de consultas de analítica (Redis o en memoria)
 
 ## Notas
 
-- IMPORTANTE: Solo trabajar dentro de `C:\Users\sergi\Desktop\Gestor farmacia\farmacia-app`
-- NUNCA crear carpetas externas como "Gestor biblioteca" u otras
-- El proyecto usa JavaScript vanilla (sin frameworks)
-- No hay sistema de autenticación
-- Los datos de INVIMA deben existir en la base de datos
-- Dark mode se guarda en localStorage del navegador
-- Nuevo diseño V2 con estética premium cálida
+- Solo trabajar dentro de `C:\Users\sergi\Desktop\Gestor farmacia\farmacia-app`
+- Skill `clean-code` es la guía por defecto para code review
+- Cada sesión debe terminar con un informe en `docs/INFORME_SESION.md`
+- El usuario es **principiante en programación** — preferir explicaciones educativas sobre tecnicismos
+- Dark mode se guarda en `localStorage`
