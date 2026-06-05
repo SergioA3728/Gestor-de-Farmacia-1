@@ -14,7 +14,10 @@
 - **Backend**: Python + Flask + **PostgreSQL** + psycopg2 + Pandas + OpenPyXL
 - **Frontend**: HTML + CSS vanilla + JavaScript vanilla
 - **Sin frameworks** (ni React, ni Vue)
-- **AI Assistants**: skill `clean-code` activa en `.agents/skills/clean-code/SKILL.md`
+- **AI Assistants**: skills `clean-code` y `session-report` activas en `.agents/skills/`
+  - `clean-code/SKILL.md` — guía por defecto para code review y arquitectura
+  - `session-report/SKILL.md` — comportamiento pedagógico + formato del informe de sesión
+  - `session-report/SKILL-generic.md` — versión genérica reutilizable en otros proyectos
 
 ## Estructura de Archivos
 ```
@@ -33,6 +36,9 @@ farmacia-app/
 └── .agents/
     └── skills/
         ├── clean-code/         # Software Crafter Experto
+        ├── session-report/     # Comportamiento pedagógico + informe educativo
+        │   ├── SKILL.md            # Específica de FarmaSys
+        │   └── SKILL-generic.md    # Reutilizable en otros proyectos
         ├── accessibility/      # WCAG 2.2
         ├── flask-api-development/
         ├── frontend-design/
