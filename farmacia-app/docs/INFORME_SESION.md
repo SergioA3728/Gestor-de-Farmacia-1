@@ -636,4 +636,199 @@ grep -E "sqlite|farmacia\.db|pragma_table_info|executescript|lastrowid" app.py
 
 ---
 
-*Generado al final de la sesión 4. Si tienes PostgreSQL instalado y quieres probarlo, sigue [Cómo correr local](#cómo-correr-local). Si encuentras un bug, ábrelo con el patrón de las sesiones anteriores.*
+# Informe de Cambios — Sesión 2026-06-05
+
+> **Tema:** deploy en Render + 3 fixes críticos post-deploy.
+> **Alcance:** `Procfile`, `requirements.txt`, `runtime.txt`, `app.py`. Sin tocar frontend ni lógica de negocio.
+
+---
+
+## TL;DR
+
+La app pasó de local a producción en `https://gestor-de-farmacia-1.onrender.com`. El deploy tuvo **3 errores en cascada** que se resolvieron en 3 commits: gunicorn necesitó Start Command explícito, `init_db()` no corría porque gunicorn no ejecuta `if __name__ == "__main__"`, y 38 llamadas a `conn.execute()` no funcionaban en psycopg2. Lección: **probar localmente con el mismo comando de prod antes de hacer deploy**.
+
+| # | Commit | Tema | +/- |
+|---|--------|------|-----|
+| 1 | `2f72dd9` | Preparar deploy: gunicorn + runtime.txt | +5 / -2 |
+| 2 | `43a31fa` | Fix: `init_db()` en top-level | +28 / -2 |
+| 3 | `6e4311d` | Fix: helper `query()` para psycopg2 | +59 / -38 |
+
+---
+
+## Conceptos aplicados / decisiones de diseño
+
+### Decisión 1: gunicorn en lugar del dev server de Flask
+
+**Qué se hizo:** cambiar `web: python app.py` por `web: gunicorn app:app` en el `Procfile`, y agregar `gunicorn` a `requirements.txt`.
+
+**Concepto:** el servidor que viene con Flask (`flask run` o `app.run()`) es **solo para desarrollo**. Maneja 1 request a la vez, expone stack traces en HTML, y no es seguro en internet. En producción se usa un **servidor WSGI** como gunicorn (Linux), waitress (Windows) o uWSGI.
+
+**Por qué gunicorn y no waitress:**
+
+| | gunicorn | waitress |
+|---|---|---|
+| Estándar en Linux/Render | ✅ sí | ❌ menos común |
+| Funciona en Windows | ❌ no (usa `fcntl`) | ✅ sí |
+| Estándar de la industria | ✅ el más usado | ⚠️ segundo lugar |
+
+**Elegimos gunicorn** porque Render es Linux. El "no se puede probar en Windows" es solo una limitación del entorno dev, no del código.
+
+**Lección:** cada entorno (dev / staging / prod) tiene su propio "runtime" (cómo se ejecuta tu código). En local puede ser `flask run`, en prod `gunicorn`. No son intercambiables.
+
+### Decisión 2: `runtime.txt` para fijar la versión de Python
+
+**Qué se hizo:** crear `runtime.txt` con `python-3.12.3`.
+
+**Concepto:** Heroku y Render (que vienen de la cultura Heroku) leen un archivo `runtime.txt` en la raíz del proyecto para saber qué versión de Python usar. Esto evita que el servidor de producción use una versión distinta a la que probaste.
+
+**Dato curioso que aprendimos en este deploy:** Render **ignoró** nuestro `runtime.txt` y usó Python 3.14.3 (su default). Probablemente porque `runtime.txt` está deprecado en Render. **No rompió nada** (la app es compatible con 3.12 y 3.14), pero el control sobre la versión ya no lo tenemos.
+
+**Lección:** los archivos de "configuración mágica" (runtime.txt, Procfile) son útiles pero **frágiles** — el proveedor puede dejarlos de soportar. Vale la pena tener la app compatible con varias versiones.
+
+### Decisión 3: `init_db()` en top-level (no dentro de `if __name__`) — **EL FIX CRÍTICO**
+
+**Qué se hizo:** mover `init_db()` desde dentro del bloque `if __name__ == "__main__":` al top-level del archivo. Se ejecuta **cada vez que se importa el módulo**, no solo cuando se corre `python app.py`.
+
+**El problema que resolvió:**
+
+```python
+# ANTES (no funcionaba en Render):
+if __name__ == "__main__":
+    init_db()           # ← solo se ejecuta con `python app.py`
+    app.run(...)
+
+# DESPUÉS (funciona en Render):
+init_db()               # ← se ejecuta al importar el módulo
+
+if __name__ == "__main__":
+    app.run(...)
+```
+
+**Por qué pasó esto:**
+
+| Comando | ¿Ejecuta `if __name__ == "__main__"`? |
+|---|---|
+| `python app.py` | ✅ sí |
+| `gunicorn app:app` | ❌ **no** (gunicorn IMPORTA el módulo y busca la variable `app`) |
+
+Resultado: en Render, `init_db()` nunca se ejecutaba, las tablas no se creaban, y **todos los endpoints que tocaban la BD daban 500**.
+
+**¿Por qué es seguro ejecutarlo múltiples veces?**
+
+- `CREATE TABLE IF NOT EXISTS` → no falla si la tabla ya existe
+- El sembrado de INVIMA tiene un check `SELECT COUNT(*) FROM invima` → solo inserta si la tabla está vacía
+- En general: `init_db()` es **idompatente** (correo seguro varias veces)
+
+**Lección:** `if __name__ == "__main__"` no es para "código que quiero que corra siempre", es para "código que solo quiero cuando ejecuto el script directamente". Los side-effects (como `init_db()`) que quieras en producción deben ir al top-level o a un script aparte.
+
+**Documentación dejada en el código:** un bloque de comentarios explica todo esto, incluyendo cómo migrar a un script separado (`scripts/init_db.py`) si en el futuro la app crece.
+
+### Decisión 4: Helper `query()` como wrapper sobre el patrón psycopg2 — **EL FIX RAÍZ**
+
+**Qué se hizo:** agregar un helper de 4 líneas al inicio de `app.py` y reemplazar las 38 llamadas a `conn.execute(...)` por `query(conn, ...)`.
+
+**El problema que resolvió:**
+
+```python
+# ANTES (sqlite3, ya no funciona):
+total = conn.execute("SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"]
+
+# DESPUÉS (psycopg2, sí funciona):
+def query(conn, sql, params=None):
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    return cur
+
+total = query(conn, "SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"]
+```
+
+**Por qué psycopg2 es distinto:**
+
+- `sqlite3`: el objeto `connection` tiene `.execute()` que devuelve un cursor
+- `psycopg2`: el objeto `connection` **no tiene `.execute()`** — hay que crear un cursor explícitamente
+
+Esto se nos pasó en la sesión 4 cuando hicimos la migración. En local funcionó porque solo probamos `init_db()` y un SELECT de prueba, pero nunca testeamos los endpoints. En Render, los endpoints se ejecutan por primera vez y **boom**.
+
+**Por qué un helper en vez de 38 cambios directos:**
+
+| Opción | Cambios | Si en el futuro cambias a SQLAlchemy |
+|---|---|---|
+| Cambiar cada función con `cur = conn.cursor()` | 38 | Tocar las 38 funciones de nuevo |
+| Helper `query(conn, sql, params)` | 1 helper + 38 prefijos | Tocar **1 sola función** |
+
+**Lección:** cuando un patrón se repite N veces en tu código, **considera centralizarlo**. El costo del helper es despreciable; el beneficio (mantenibilidad + futuro cambio de librería) es enorme.
+
+### Decisión 5: no pagar el plan de Render (aceptar cold start)
+
+**Qué se hizo:** dejar la app en el plan Free de Render, que "duerme" después de 15 minutos sin uso.
+
+**Por qué:** el plan free cuesta $0. El plan Starter cuesta $7/mes. Para una app de aprendizaje + una farmacia, $0/mes es suficiente. El trade-off es que la primera request después de un rato de inactividad tarda 30-60 segundos (cold start).
+
+**Lo que NO se hizo (decisión consciente):**
+
+- ❌ Pagar el plan → no es necesario
+- ❌ Migrar a Railway / Fly.io → no vale la pena por ahora
+- ❌ Configurar un "keep-alive" externo (cron que pegue cada 10 min) → es contra los TOS de Render y no es confiable
+
+**Lección:** los servicios cloud tienen planes. Saber cuál te sirve **hoy** es una decisión técnica, no financiera. Se puede migrar de plan cuando la app lo amerite.
+
+---
+
+## Lo que NO se hizo (decisiones conscientes)
+
+| Lo que NO hicimos | Por qué |
+|---|---|
+| Probar gunicorn localmente antes de deploy | gunicorn no funciona en Windows (`fcntl` no existe). Confiamos en que funcionaría en Render (Linux). Funcionó. |
+| Crear un script `scripts/init_db.py` separado | Para 4 tablas y 158 productos, el top-level es suficiente. La documentación explica cómo migrar a script si crece. |
+| Cambiar el render template para que el JS consuma desde un proxy | Los endpoints funcionan, no hay razón |
+| Configurar HTTPS personalizado | Render lo provee gratis con Let's Encrypt |
+| Configurar un dominio custom (`farmacia.com.co`) | El subdominio `onrender.com` es suficiente por ahora |
+
+---
+
+## Cómo revisar los cambios tú mismo
+
+```bash
+cd "C:\Users\sergi\Desktop\Gestor farmacia\farmacia-app"
+
+# Ver los 3 commits de hoy
+git log --oneline -3
+
+# Ver el diff completo del fix raíz (el más educativo)
+git show 6e4311d -- app.py
+
+# Probar la app en producción (Render tarda 30-60s si está dormida)
+curl https://gestor-de-farmacia-1.onrender.com/api/dashboard
+```
+
+**Orden sugerido de lectura de los commits:** `6e4311d` (helper, fix raíz) → `43a31fa` (init_db, fix sutil) → `2f72dd9` (preparación, base del deploy).
+
+---
+
+## Lecciones para llevar (resumen)
+
+| # | Concepto | Cuándo aplicarlo |
+|---|----------|------------------|
+| 1 | **gunicorn ≠ Flask dev server** | Cuando vayas a deployar una app Flask a producción |
+| 2 | **`if __name__ == "__main__"` no se ejecuta con gunicorn** | Cuando uses gunicorn/uWSGI, los side-effects van al top-level o a scripts |
+| 3 | **psycopg2 requiere `cur = conn.cursor().execute()`** | Cualquier proyecto con psycopg2 — el `conn.execute()` de sqlite3 no existe |
+| 4 | **Un helper centralizado > 38 cambios repetidos** | Cuando un patrón se repite N veces, DRY > inlining |
+| 5 | **Probar con el mismo comando de prod antes de deploy** | El `app.run()` local ≠ `gunicorn app:app` en Render. Si podés, probá con gunicorn antes. |
+| 6 | **`runtime.txt` es frágil** | Útil pero deprecado. Mejor: hacer la app compatible con varias versiones |
+| 7 | **Cold start es un trade-off del plan free** | Saber cuándo vale la pena pagar o cuándo quedarse en free |
+
+---
+
+## Lo que aprendimos juntos (resumen ejecutivo)
+
+- ✅ **PostgreSQL ya estaba instalado** en el PC (PostgreSQL 18). Lo descubrimos juntos.
+- ✅ **La contraseña de postgres no se podía recuperar** — la reseteamos juntos modificando temporalmente `pg_hba.conf` y reiniciando el servicio.
+- ✅ **El deploy tuvo 3 errores en cascada**, cada uno más sutil que el anterior. Los 3 son errores **comunes** que cualquier dev junior enfrenta al deployar por primera vez.
+- ✅ **El "init_db en top-level" fue el más educativo** porque toca un concepto fundamental: la diferencia entre ejecutar un script e importar un módulo.
+- ✅ **El helper `query()` es la mejor decisión de diseño** porque centraliza el patrón, lo que hace que la app sea más fácil de mantener y migrar.
+
+---
+
+*Generado al final de la sesión 5 (2026-06-05). La app está en producción en `https://gestor-de-farmacia-1.onrender.com`. Si Render no responde, esperá 30-60 segundos y refrescá (cold start del plan free).*
+
+*Si en el futuro querés recordar cómo se hizo algo, este informe + el commit `6e4311d` son los mejores puntos de partida.*

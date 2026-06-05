@@ -1,7 +1,8 @@
 # Gestor Farmacia - Contexto del Proyecto
 
-> **Última actualización:** 2026-06-04 (sesión 4)
-> **Estado:** migración a PostgreSQL completada. Premium = OFF.
+> **Última actualización:** 2026-06-05 (sesión 5)
+> **Estado:** deployado en Render. PostgreSQL. Premium = OFF.
+> **Producción:** https://gestor-de-farmacia-1.onrender.com (plan free, cold start 30-60s)
 > Para revisar cambios de la última sesión: `docs/INFORME_SESION.md`.
 
 ## Información General
@@ -180,7 +181,7 @@ Luego abrir: http://127.0.0.1:5000
 - [ ] Gráficas más elaboradas (Chart.js) si el volumen de datos crece
 - [ ] Sistema de autenticación multi-usuario
 - [ ] Caché de consultas de analítica (Redis o en memoria)
-- [ ] Deploy continuo a Render (web service + PostgreSQL free tier)
+- [x] Deploy a Render (web service + PostgreSQL free tier) — hecho en sesión 5
 
 ## Notas
 
