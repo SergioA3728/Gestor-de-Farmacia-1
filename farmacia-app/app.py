@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify, render_template
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
-DB = "farmacia.db"
 STOCK_MINIMO = 10
 STOCK_CRITICO = 5
 DIAS_ALERTA_VENCIMIENTO = 30
@@ -24,23 +28,31 @@ MARGEN_POR_CATEGORIA = {
 }
 
 def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL no está configurada. "
+            "Defínela con: set DATABASE_URL=postgresql://usuario:clave@localhost:5432/farmacia"
+        )
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
 
 def init_db():
     conn = get_db()
-    conn.executescript("""
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS catalogo (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            id          SERIAL PRIMARY KEY,
             nombre      TEXT NOT NULL,
             principio   TEXT,
             laboratorio TEXT,
             descripcion TEXT
-        );
-
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS inventario (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            id               SERIAL PRIMARY KEY,
             invima_id        INTEGER,
             catalogo_id      INTEGER,
             nombre           TEXT NOT NULL,
@@ -48,24 +60,26 @@ def init_db():
             laboratorio      TEXT,
             registro         TEXT,
             cantidad         INTEGER NOT NULL DEFAULT 0,
-            precio           REAL NOT NULL DEFAULT 0,
+            precio           DOUBLE PRECISION NOT NULL DEFAULT 0,
             fecha_vencimiento TEXT,
             lote             TEXT
-        );
-
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS ventas (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            id              SERIAL PRIMARY KEY,
             inventario_id   INTEGER NOT NULL,
             nombre          TEXT NOT NULL,
-            laboratorio    TEXT,
-            cantidad       INTEGER NOT NULL,
-            precio_unitario REAL NOT NULL,
-            total           REAL NOT NULL,
-            fecha           TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
+            laboratorio     TEXT,
+            cantidad        INTEGER NOT NULL,
+            precio_unitario DOUBLE PRECISION NOT NULL,
+            total           DOUBLE PRECISION NOT NULL,
+            fecha           TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS invima (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            id               SERIAL PRIMARY KEY,
             expediente       TEXT,
             producto         TEXT,
             principio_activo TEXT,
@@ -73,11 +87,11 @@ def init_db():
             estado           TEXT,
             modalidad        TEXT,
             titular          TEXT
-        );
+        )
     """)
 
-    cur = conn.execute("SELECT COUNT(*) FROM invima")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS total FROM invima")
+    if cur.fetchone()["total"] == 0:
         productos_comunes = [
             ("C001", "SHAMPOO ANTICASPA", "KETOCONAZOL", "N/A", "N/A", "N/A", "N/A"),
             ("C002", "SHAMPOO ANTICAÍDA", "MINOXIDIL", "N/A", "N/A", "N/A", "N/A"),
@@ -238,9 +252,9 @@ def init_db():
             ("C157", "COMFORT", "N/A", "N/A", "N/A", "N/A", "N/A"),
             ("C158", "LUCAS", "N/A", "N/A", "N/A", "N/A", "N/A"),
         ]
-        conn.executemany("""
+        cur.executemany("""
             INSERT INTO invima (expediente, producto, principio_activo, registro, estado, modalidad, titular)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, productos_comunes)
     
     _ensure_column(conn, "inventario", "fecha_vencimiento", "TEXT")
@@ -252,12 +266,15 @@ def init_db():
 
 
 def _ensure_column(conn, table, column, definition):
-    existe = conn.execute(
-        "SELECT 1 FROM pragma_table_info(?) WHERE name = ?",
-        (table, column)
-    ).fetchone()
-    if not existe:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+    """, (table, column))
+    if not cur.fetchone():
+        cur.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}')
 
 # ── INVIMA ────
 @app.route("/api/invima/buscar")
@@ -269,7 +286,7 @@ def invima_buscar():
     rows = conn.execute("""
         SELECT id, expediente, producto, principio_activo, registro, modalidad, titular
         FROM invima
-        WHERE producto LIKE ? OR principio_activo LIKE ? OR titular LIKE ?
+        WHERE producto LIKE %s OR principio_activo LIKE %s OR titular LIKE %s
         LIMIT 30
     """, (f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
     conn.close()
@@ -363,12 +380,14 @@ def catalogo_listar():
 def catalogo_crear():
     d = request.json
     conn = get_db()
-    cur = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         INSERT INTO catalogo (nombre, principio, laboratorio, descripcion)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id
     """, (d["nombre"], d.get("principio",""), d.get("laboratorio",""), d.get("descripcion","")))
+    nuevo_id = cur.fetchone()["id"]
     conn.commit()
-    nuevo_id = cur.lastrowid
     conn.close()
     return jsonify({"ok": True, "id": nuevo_id})
 
@@ -388,14 +407,14 @@ def inventario_agregar():
     conn = get_db()
     existing = conn.execute("""
         SELECT id, cantidad FROM inventario
-        WHERE (invima_id = ? AND invima_id IS NOT NULL)
-           OR (catalogo_id = ? AND catalogo_id IS NOT NULL)
+        WHERE (invima_id = %s AND invima_id IS NOT NULL)
+           OR (catalogo_id = %s AND catalogo_id IS NOT NULL)
     """, (d.get("invima_id"), d.get("catalogo_id"))).fetchone()
 
     if existing:
         conn.execute("""
-            UPDATE inventario SET cantidad = cantidad + ?, precio = ?
-            WHERE id = ?
+            UPDATE inventario SET cantidad = cantidad + %s, precio = %s
+            WHERE id = %s
         """, (d["cantidad"], d["precio"], existing["id"]))
         conn.commit()
         conn.close()
@@ -405,7 +424,7 @@ def inventario_agregar():
         conn.execute("""
             INSERT INTO inventario
                 (invima_id, catalogo_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             d.get("invima_id"), d.get("catalogo_id"),
             d["nombre"], d.get("principio",""), d.get("laboratorio",""),
@@ -419,7 +438,7 @@ def inventario_agregar():
 @app.route("/api/inventario/<int:item_id>", methods=["DELETE"])
 def inventario_eliminar(item_id):
     conn = get_db()
-    conn.execute("DELETE FROM inventario WHERE id = ?", (item_id,))
+    conn.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -430,8 +449,8 @@ def inventario_actualizar(item_id):
     conn = get_db()
     conn.execute("""
         UPDATE inventario SET 
-            precio = ?, cantidad = ?, fecha_vencimiento = ?, lote = ?, categoria = ?
-        WHERE id = ?
+            precio = %s, cantidad = %s, fecha_vencimiento = %s, lote = %s, categoria = %s
+        WHERE id = %s
     """, (d.get("precio"), d.get("cantidad"), d.get("fecha_vencimiento"), d.get("lote"), d.get("categoria", ""), item_id))
     conn.commit()
     conn.close()
@@ -496,7 +515,7 @@ def inventario_importar():
             invima_match = conn.execute("""
                 SELECT id, principio_activo, titular, registro
                 FROM invima
-                WHERE producto LIKE ? OR principio_activo LIKE ?
+                WHERE producto LIKE %s OR principio_activo LIKE %s
                 LIMIT 1
             """, (f"%{nombre}%", f"%{nombre}%")).fetchone()
         
@@ -537,20 +556,20 @@ def inventario_confirmar_importacion():
         
         existing = conn.execute("""
             SELECT id, cantidad FROM inventario
-            WHERE (invima_id = ? AND invima_id IS NOT NULL)
-               OR (nombre = ?)
+            WHERE (invima_id = %s AND invima_id IS NOT NULL)
+               OR (nombre = %s)
         """, (item.get("invima_id"), nombre)).fetchone()
         
         if existing:
             conn.execute("""
-                UPDATE inventario SET cantidad = cantidad + ?, precio = ?
-                WHERE id = ?
+                UPDATE inventario SET cantidad = cantidad + %s, precio = %s
+                WHERE id = %s
             """, (item.get("cantidad", 0), item.get("precio", 0), existing["id"]))
             actualizados += 1
         else:
             conn.execute("""
                 INSERT INTO inventario (invima_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 item.get("invima_id"), nombre, item.get("principio", ""), item.get("laboratorio", ""),
                 item.get("registro", ""), item.get("cantidad", 0), item.get("precio", 0),
@@ -571,7 +590,7 @@ def inventario_recategorizar():
     for p in productos:
         nueva_cat = inferir_categoria(p["principio"])
         if nueva_cat:
-            conn.execute("UPDATE inventario SET categoria = ? WHERE id = ?", (nueva_cat, p["id"]))
+            conn.execute("UPDATE inventario SET categoria = %s WHERE id = %s", (nueva_cat, p["id"]))
             actualizados += 1
     
     conn.commit()
@@ -710,10 +729,10 @@ def reporte_ventas():
     query = "SELECT nombre, laboratorio, cantidad, precio_unitario, total, fecha FROM ventas WHERE 1=1"
     params = []
     if desde:
-        query += " AND date(fecha) >= date(?)"
+        query += " AND fecha::date >= %s::date"
         params.append(desde)
     if hasta:
-        query += " AND date(fecha) <= date(?)"
+        query += " AND fecha::date <= %s::date"
         params.append(hasta)
     query += " ORDER BY fecha DESC"
     
@@ -803,10 +822,10 @@ def reporte_utilidad():
     query = "SELECT * FROM ventas WHERE 1=1"
     params = []
     if desde:
-        query += " AND date(fecha) >= date(?)"
+        query += " AND fecha::date >= %s::date"
         params.append(desde)
     if hasta:
-        query += " AND date(fecha) <= date(?)"
+        query += " AND fecha::date <= %s::date"
         params.append(hasta)
     query += " ORDER BY fecha DESC"
     
@@ -850,16 +869,16 @@ def dashboard_alertas():
     
     bajo_stock = conn.execute("""
         SELECT nombre, cantidad,
-               CASE WHEN cantidad <= ? THEN 'critico' ELSE 'bajo' END as nivel
+               CASE WHEN cantidad <= %s THEN 'critico' ELSE 'bajo' END as nivel
         FROM inventario
-        WHERE cantidad <= ?
+        WHERE cantidad <= %s
         ORDER BY cantidad ASC
     """, (STOCK_CRITICO, STOCK_MINIMO)).fetchall()
     
     vencer = conn.execute("""
         SELECT nombre, fecha_vencimiento, cantidad
         FROM inventario
-        WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= ?
+        WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= %s
         ORDER BY fecha_vencimiento ASC
     """, (fecha_limite,)).fetchall()
     
@@ -875,7 +894,7 @@ def dashboard_ventas_hoy():
     row = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
-        WHERE date(fecha) = date('now', 'localtime')
+        WHERE fecha::date = CURRENT_DATE
     """).fetchone()
     conn.close()
     return jsonify({"total": row["total"], "transacciones": row["transacciones"]})
@@ -887,18 +906,18 @@ def dashboard():
 
     total = conn.execute("SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"] or 0
     total_productos = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad > 0").fetchone()["count"]
-    bajo_stock = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad <= ?", (STOCK_MINIMO,)).fetchone()["count"]
+    bajo_stock = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad <= %s", (STOCK_MINIMO,)).fetchone()["count"]
 
     fecha_limite = (datetime.datetime.now() + datetime.timedelta(days=DIAS_ALERTA_VENCIMIENTO)).strftime(DATE_FMT)
     vencer = conn.execute("""
         SELECT COUNT(*) as count FROM inventario
-        WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= ?
+        WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= %s
     """, (fecha_limite,)).fetchone()["count"]
 
     ventas_mes = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total
         FROM ventas
-        WHERE date(fecha) >= date('now', 'start of month')
+        WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
     """).fetchone()["total"] or 0
 
     conn.close()
@@ -915,11 +934,11 @@ def dashboard_ventas_semana():
     import datetime
     conn = get_db()
     rows = conn.execute("""
-        SELECT date(fecha) as fecha, COALESCE(SUM(total), 0) as total
+        SELECT fecha::date as fecha, COALESCE(SUM(total), 0) as total
         FROM ventas
-        WHERE date(fecha) >= date('now', '-6 days')
-        GROUP BY date(fecha)
-        ORDER BY date(fecha) ASC
+        WHERE fecha::date >= CURRENT_DATE - INTERVAL '6 days'
+        GROUP BY fecha::date
+        ORDER BY fecha::date ASC
     """).fetchall()
     conn.close()
     
@@ -966,7 +985,7 @@ def registrar_venta():
         return jsonify({"ok": False, "error": "inventario_id requerido"}), 400
 
     item = conn.execute("""
-        SELECT id, nombre, laboratorio, cantidad, precio FROM inventario WHERE id = ?
+        SELECT id, nombre, laboratorio, cantidad, precio FROM inventario WHERE id = %s
     """, (inv_id,)).fetchone()
 
     if not item:
@@ -980,13 +999,15 @@ def registrar_venta():
     total = item["precio"] * d["cantidad"]
 
     conn.execute("""
-        UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?
+        UPDATE inventario SET cantidad = cantidad - %s WHERE id = %s
     """, (d["cantidad"], item["id"]))
 
+    import datetime
+    fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
     conn.execute("""
-        INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total))
+        INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total, fecha_actual))
 
     conn.commit()
     conn.close()
@@ -1013,13 +1034,13 @@ def analytics_comparativa():
     actual = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
-        WHERE date(fecha) >= date('now', 'start of month')
+        WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
     """).fetchone()
     anterior = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
-        WHERE date(fecha) >= date('now', 'start of month', '-1 month')
-          AND date(fecha) <  date('now', 'start of month')
+        WHERE fecha::date >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')::date
+          AND fecha::date <  DATE_TRUNC('month', CURRENT_DATE)::date
     """).fetchone()
     conn.close()
     a_total, a_tx = actual["total"] or 0, actual["transacciones"] or 0
@@ -1128,7 +1149,7 @@ def analytics_proyeccion():
     ventas_mes = conn.execute("""
         SELECT COALESCE(SUM(total), 0) as total
         FROM ventas
-        WHERE date(fecha) >= date('now', 'start of month')
+        WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
     """).fetchone()["total"] or 0
     conn.close()
 

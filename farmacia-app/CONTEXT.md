@@ -1,7 +1,7 @@
 # Gestor Farmacia - Contexto del Proyecto
 
-> **Última actualización:** 2026-06-03 (sesión 3)
-> **Estado:** producción local. Premium = OFF.
+> **Última actualización:** 2026-06-04 (sesión 4)
+> **Estado:** migración a PostgreSQL completada. Premium = OFF.
 > Para revisar cambios de la última sesión: `docs/INFORME_SESION.md`.
 
 ## Información General
@@ -11,7 +11,7 @@
 - **Sesiones de cambios**: ver `docs/INFORME_SESION.md` después de cada sesión
 
 ## Stack Tecnológico
-- **Backend**: Python + Flask + SQLite + Pandas + OpenPyXL
+- **Backend**: Python + Flask + **PostgreSQL** + psycopg2 + Pandas + OpenPyXL
 - **Frontend**: HTML + CSS vanilla + JavaScript vanilla
 - **Sin frameworks** (ni React, ni Vue)
 - **AI Assistants**: skill `clean-code` activa en `.agents/skills/clean-code/SKILL.md`
@@ -20,7 +20,8 @@
 ```
 farmacia-app/
 ├── app.py                 # Backend Flask - rutas API + página principal
-├── farmacia.db            # Base de datos SQLite
+├── .env.example           # Plantilla de variables de entorno (DATABASE_URL)
+├── requirements.txt       # Dependencias: flask, pandas, openpyxl, werkzeug, psycopg2-binary
 ├── CONTEXT.md             # Este archivo
 ├── docs/
 │   └── INFORME_SESION.md  # Informe educativo de cada sesión
@@ -42,7 +43,7 @@ farmacia-app/
         └── ...
 ```
 
-## Base de Datos (SQLite)
+## Base de Datos (PostgreSQL)
 
 ### Tablas:
 1. **inventario**: id, nombre, principio, laboratorio, cantidad, precio, fecha_vencimiento, lote, categoria, invima_id
@@ -145,12 +146,14 @@ Analgésicos / Antibióticos / Antialérgicos / Antidiabéticos / Gastrointestin
 4. **Catálogo hardcoded de INVIMA** — 158 productos comunes sembrados en `init_db()`.
 5. **No hay tests automatizados** — verificado manualmente con Flask test client.
 6. **No hay sistema de autenticación** — single user, local-only.
+7. **PostgreSQL como única BD** (sesión 4) — sin fallback a SQLite. Conexión vía `DATABASE_URL`. `psycopg2` con `RealDictCursor`.
 
 ## Cómo Ejecutar
 
 ```bash
 cd "C:\Users\sergi\Desktop\Gestor farmacia\farmacia-app"
-pip install flask pandas openpyxl
+pip install -r requirements.txt
+set DATABASE_URL=postgresql://usuario:clave@localhost:5432/farmacia
 python app.py
 ```
 
@@ -158,8 +161,10 @@ Luego abrir: http://127.0.0.1:5000
 
 ## Errores Comunes
 
-1. **`ModuleNotFoundError: No module named 'flask'`** → `pip install flask pandas openpyxl`
-2. **`sqlite3.OperationalError: no such table: inventario`** → borrar `farmacia.db` y reiniciar
+1. **`ModuleNotFoundError: No module named 'flask'`** → `pip install -r requirements.txt`
+2. **`RuntimeError: DATABASE_URL no está configurada`** → definir la variable de entorno (ver `.env.example`).
+3. **`psycopg2.OperationalError: connection to server failed`** → PostgreSQL no está corriendo, o la URL es incorrecta.
+4. **`UndefinedColumn: column ... does not exist`** → la BD tiene un schema viejo; borrar la BD y dejar que `init_db()` la recree.
 
 ## Próximos Pasos / Ideas (no implementadas)
 
@@ -169,6 +174,7 @@ Luego abrir: http://127.0.0.1:5000
 - [ ] Gráficas más elaboradas (Chart.js) si el volumen de datos crece
 - [ ] Sistema de autenticación multi-usuario
 - [ ] Caché de consultas de analítica (Redis o en memoria)
+- [ ] Deploy continuo a Render (web service + PostgreSQL free tier)
 
 ## Notas
 
