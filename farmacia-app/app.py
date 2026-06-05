@@ -27,6 +27,27 @@ MARGEN_POR_CATEGORIA = {
     "Otros": 0.28,
 }
 
+# ── HELPER DE QUERIES ────────────────────────────────────
+# ¿Por qué este helper existe?
+# ------------------------------------------------------------
+# sqlite3 permitía hacer `conn.execute("SELECT ...").fetchone()` directamente.
+# psycopg2 NO: hay que hacer `cur = conn.cursor(); cur.execute(...)`.
+#
+# En vez de ensuciar cada función con `cur = conn.cursor(); cur.execute(...)`
+# (opción repetitiva y verbosa), centralizamos el patrón en este helper.
+#
+# Si en el futuro cambias psycopg2 por SQLAlchemy u otra librería, solo
+# cambias ESTA función, no las 38 llamadas que la usan.
+#
+# Uso:
+#   total = query(conn, "SELECT SUM(cantidad) as t FROM inventario").fetchone()["t"]
+#   rows  = query(conn, "SELECT * FROM catalogo").fetchall()
+#   query(conn, "DELETE FROM inventario WHERE id = %s", (item_id,))  # INSERT/UPDATE/DELETE
+def query(conn, sql, params=None):
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    return cur
+
 def get_db():
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -283,7 +304,7 @@ def invima_buscar():
     if len(q) < 2:
         return jsonify([])
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT id, expediente, producto, principio_activo, registro, modalidad, titular
         FROM invima
         WHERE producto LIKE %s OR principio_activo LIKE %s OR titular LIKE %s
@@ -372,7 +393,7 @@ def categorias_listar():
 @app.route("/api/catalogo", methods=["GET"])
 def catalogo_listar():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM catalogo ORDER BY nombre").fetchall()
+    rows = query(conn, "SELECT * FROM catalogo ORDER BY nombre").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -395,7 +416,7 @@ def catalogo_crear():
 @app.route("/api/inventario", methods=["GET"])
 def inventario_listar():
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT * FROM inventario ORDER BY nombre
     """).fetchall()
     conn.close()
@@ -405,14 +426,14 @@ def inventario_listar():
 def inventario_agregar():
     d = request.json
     conn = get_db()
-    existing = conn.execute("""
+    existing = query(conn, """
         SELECT id, cantidad FROM inventario
         WHERE (invima_id = %s AND invima_id IS NOT NULL)
            OR (catalogo_id = %s AND catalogo_id IS NOT NULL)
     """, (d.get("invima_id"), d.get("catalogo_id"))).fetchone()
 
     if existing:
-        conn.execute("""
+        query(conn, """
             UPDATE inventario SET cantidad = cantidad + %s, precio = %s
             WHERE id = %s
         """, (d["cantidad"], d["precio"], existing["id"]))
@@ -421,7 +442,7 @@ def inventario_agregar():
         return jsonify({"ok": True, "accion": "actualizado"})
     else:
         categoria = d.get("categoria", "") or inferir_categoria(d.get("principio", ""))
-        conn.execute("""
+        query(conn, """
             INSERT INTO inventario
                 (invima_id, catalogo_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -438,7 +459,7 @@ def inventario_agregar():
 @app.route("/api/inventario/<int:item_id>", methods=["DELETE"])
 def inventario_eliminar(item_id):
     conn = get_db()
-    conn.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
+    query(conn, "DELETE FROM inventario WHERE id = %s", (item_id,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -447,7 +468,7 @@ def inventario_eliminar(item_id):
 def inventario_actualizar(item_id):
     d = request.json
     conn = get_db()
-    conn.execute("""
+    query(conn, """
         UPDATE inventario SET 
             precio = %s, cantidad = %s, fecha_vencimiento = %s, lote = %s, categoria = %s
         WHERE id = %s
@@ -512,7 +533,7 @@ def inventario_importar():
         
         invima_match = None
         if nombre:
-            invima_match = conn.execute("""
+            invima_match = query(conn, """
                 SELECT id, principio_activo, titular, registro
                 FROM invima
                 WHERE producto LIKE %s OR principio_activo LIKE %s
@@ -554,20 +575,20 @@ def inventario_confirmar_importacion():
         if not nombre:
             continue
         
-        existing = conn.execute("""
+        existing = query(conn, """
             SELECT id, cantidad FROM inventario
             WHERE (invima_id = %s AND invima_id IS NOT NULL)
                OR (nombre = %s)
         """, (item.get("invima_id"), nombre)).fetchone()
         
         if existing:
-            conn.execute("""
+            query(conn, """
                 UPDATE inventario SET cantidad = cantidad + %s, precio = %s
                 WHERE id = %s
             """, (item.get("cantidad", 0), item.get("precio", 0), existing["id"]))
             actualizados += 1
         else:
-            conn.execute("""
+            query(conn, """
                 INSERT INTO inventario (invima_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
@@ -584,13 +605,13 @@ def inventario_confirmar_importacion():
 @app.route("/api/inventario/recategorizar", methods=["POST"])
 def inventario_recategorizar():
     conn = get_db()
-    productos = conn.execute("SELECT id, principio FROM inventario WHERE categoria IS NULL OR categoria = ''").fetchall()
+    productos = query(conn, "SELECT id, principio FROM inventario WHERE categoria IS NULL OR categoria = ''").fetchall()
     
     actualizados = 0
     for p in productos:
         nueva_cat = inferir_categoria(p["principio"])
         if nueva_cat:
-            conn.execute("UPDATE inventario SET categoria = %s WHERE id = %s", (nueva_cat, p["id"]))
+            query(conn, "UPDATE inventario SET categoria = %s WHERE id = %s", (nueva_cat, p["id"]))
             actualizados += 1
     
     conn.commit()
@@ -607,7 +628,7 @@ def reporte_inventario():
     from datetime import datetime
     
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT nombre, laboratorio, cantidad, precio, fecha_vencimiento, categoria
         FROM inventario WHERE cantidad > 0 ORDER BY cantidad ASC
     """).fetchall()
@@ -736,7 +757,7 @@ def reporte_ventas():
         params.append(hasta)
     query += " ORDER BY fecha DESC"
     
-    rows = conn.execute(query, params).fetchall()
+    rows = query(conn, query, params).fetchall()
     conn.close()
     
     data = [dict(r) for r in rows]
@@ -829,9 +850,9 @@ def reporte_utilidad():
         params.append(hasta)
     query += " ORDER BY fecha DESC"
     
-    ventas = conn.execute(query, params).fetchall()
+    ventas = query(conn, query, params).fetchall()
     
-    inventario_actual = conn.execute("SELECT SUM(cantidad * precio) as costo FROM inventario").fetchone()
+    inventario_actual = query(conn, "SELECT SUM(cantidad * precio) as costo FROM inventario").fetchone()
     conn.close()
     
     ventas_data = [dict(r) for r in ventas]
@@ -867,7 +888,7 @@ def dashboard_alertas():
     
     fecha_limite = (datetime.datetime.now() + datetime.timedelta(days=DIAS_ALERTA_VENCIMIENTO)).strftime(DATE_FMT)
     
-    bajo_stock = conn.execute("""
+    bajo_stock = query(conn, """
         SELECT nombre, cantidad,
                CASE WHEN cantidad <= %s THEN 'critico' ELSE 'bajo' END as nivel
         FROM inventario
@@ -875,7 +896,7 @@ def dashboard_alertas():
         ORDER BY cantidad ASC
     """, (STOCK_CRITICO, STOCK_MINIMO)).fetchall()
     
-    vencer = conn.execute("""
+    vencer = query(conn, """
         SELECT nombre, fecha_vencimiento, cantidad
         FROM inventario
         WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= %s
@@ -891,7 +912,7 @@ def dashboard_alertas():
 @app.route("/api/dashboard/ventas-hoy", methods=["GET"])
 def dashboard_ventas_hoy():
     conn = get_db()
-    row = conn.execute("""
+    row = query(conn, """
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
         WHERE fecha::date = CURRENT_DATE
@@ -904,17 +925,17 @@ def dashboard():
     import datetime
     conn = get_db()
 
-    total = conn.execute("SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"] or 0
-    total_productos = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad > 0").fetchone()["count"]
-    bajo_stock = conn.execute("SELECT COUNT(*) as count FROM inventario WHERE cantidad <= %s", (STOCK_MINIMO,)).fetchone()["count"]
+    total = query(conn, "SELECT SUM(cantidad) as total FROM inventario").fetchone()["total"] or 0
+    total_productos = query(conn, "SELECT COUNT(*) as count FROM inventario WHERE cantidad > 0").fetchone()["count"]
+    bajo_stock = query(conn, "SELECT COUNT(*) as count FROM inventario WHERE cantidad <= %s", (STOCK_MINIMO,)).fetchone()["count"]
 
     fecha_limite = (datetime.datetime.now() + datetime.timedelta(days=DIAS_ALERTA_VENCIMIENTO)).strftime(DATE_FMT)
-    vencer = conn.execute("""
+    vencer = query(conn, """
         SELECT COUNT(*) as count FROM inventario
         WHERE fecha_vencimiento IS NOT NULL AND fecha_vencimiento != '' AND fecha_vencimiento <= %s
     """, (fecha_limite,)).fetchone()["count"]
 
-    ventas_mes = conn.execute("""
+    ventas_mes = query(conn, """
         SELECT COALESCE(SUM(total), 0) as total
         FROM ventas
         WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
@@ -933,7 +954,7 @@ def dashboard():
 def dashboard_ventas_semana():
     import datetime
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT fecha::date as fecha, COALESCE(SUM(total), 0) as total
         FROM ventas
         WHERE fecha::date >= CURRENT_DATE - INTERVAL '6 days'
@@ -955,7 +976,7 @@ def dashboard_ventas_semana():
 @app.route("/api/dashboard/top-productos", methods=["GET"])
 def dashboard_top_productos():
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT nombre, SUM(cantidad) as vendidos
         FROM ventas
         GROUP BY nombre
@@ -969,7 +990,7 @@ def dashboard_top_productos():
 @app.route("/api/ventas", methods=["GET"])
 def ventas_listar():
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT * FROM ventas ORDER BY fecha DESC LIMIT 100
     """).fetchall()
     conn.close()
@@ -984,7 +1005,7 @@ def registrar_venta():
         conn.close()
         return jsonify({"ok": False, "error": "inventario_id requerido"}), 400
 
-    item = conn.execute("""
+    item = query(conn, """
         SELECT id, nombre, laboratorio, cantidad, precio FROM inventario WHERE id = %s
     """, (inv_id,)).fetchone()
 
@@ -998,13 +1019,13 @@ def registrar_venta():
 
     total = item["precio"] * d["cantidad"]
 
-    conn.execute("""
+    query(conn, """
         UPDATE inventario SET cantidad = cantidad - %s WHERE id = %s
     """, (d["cantidad"], item["id"]))
 
     import datetime
     fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
-    conn.execute("""
+    query(conn, """
         INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
     """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total, fecha_actual))
@@ -1031,12 +1052,12 @@ def analytics_comparativa():
     if err := _premium_required():
         return err
     conn = get_db()
-    actual = conn.execute("""
+    actual = query(conn, """
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
         WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
     """).fetchone()
-    anterior = conn.execute("""
+    anterior = query(conn, """
         SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as transacciones
         FROM ventas
         WHERE fecha::date >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')::date
@@ -1058,7 +1079,7 @@ def analytics_rotacion():
     if err := _premium_required():
         return err
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT i.nombre,
                i.cantidad as stock,
                COALESCE(SUM(v.cantidad), 0) as vendidos,
@@ -1081,7 +1102,7 @@ def analytics_rentabilidad():
     if err := _premium_required():
         return err
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT i.categoria, COALESCE(SUM(v.total), 0) as ventas
         FROM ventas v
         JOIN inventario i ON v.inventario_id = i.id
@@ -1108,7 +1129,7 @@ def analytics_margen():
     if err := _premium_required():
         return err
     conn = get_db()
-    rows = conn.execute("""
+    rows = query(conn, """
         SELECT i.categoria, COALESCE(SUM(v.total), 0) as ventas
         FROM ventas v
         JOIN inventario i ON v.inventario_id = i.id
@@ -1146,7 +1167,7 @@ def analytics_proyeccion():
     dias_restantes = (fin_mes - hoy).days
 
     conn = get_db()
-    ventas_mes = conn.execute("""
+    ventas_mes = query(conn, """
         SELECT COALESCE(SUM(total), 0) as total
         FROM ventas
         WHERE fecha::date >= DATE_TRUNC('month', CURRENT_DATE)::date
