@@ -1170,7 +1170,33 @@ def analytics_proyeccion():
 def index():
     return render_template("index.html", premium_enabled=PREMIUM_ENABLED)
 
+# ── INIT_DB EN TOP-LEVEL ────────────────────────────────
+# ¿Por qué aquí y no dentro de `if __name__ == "__main__"`?
+# ------------------------------------------------------------
+# Render ejecuta `gunicorn app:app` (definido en Procfile).
+# gunicorn IMPORTA el módulo `app` y busca la variable `app` (la Flask instance).
+# NO ejecuta el bloque `if __name__ == "__main__"`, porque ese solo corre
+# cuando haces `python app.py` directamente.
+#
+# Si init_db() quedara dentro de ese bloque, en producción las tablas NUNCA
+# se crearían y todos los endpoints que tocan la BD darían 500.
+#
+# ¿Por qué es seguro ejecutarlo al importar?
+# - init_db() usa `CREATE TABLE IF NOT EXISTS` y `INSERT ... ON CONFLICT`
+#   (en este código, el sembrado de 158 productos INVIMA usa un check
+#   `SELECT COUNT(*) FROM invima` antes de insertar). Es idempotente.
+# - Aunque gunicorn tenga N workers, init_db() corre 1 vez por worker.
+#   El costo es despreciable (158 inserts en una BD ya creada se saltan).
+#
+# Si en el futuro quieres volver al modo "solo en python app.py":
+#   1. Mueve init_db() de vuelta dentro del bloque `if __name__ == "__main__"`
+#   2. Crea un script separado (ej: scripts/init_db.py) que ejecute init_db()
+#   3. Agrega un paso en el "Build Command" de Render:
+#      pip install -r requirements.txt && python scripts/init_db.py
+#   4. El Procfile queda con `gunicorn app:app` (sin init_db)
+# Eso es más limpio para apps grandes con muchas tablas/migraciones.
+# Para esta app (4 tablas, 158 productos), el approach top-level es suficiente.
+init_db()
+
 if __name__ == "__main__":
-    import os
-    init_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
