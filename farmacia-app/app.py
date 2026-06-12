@@ -208,7 +208,7 @@ CATEGORIAS_KEYWORDS = {
     "propranolol": "Antidiabéticos / Antihipertensivos", "atenolol": "Antidiabéticos / Antihipertensivos",
     "carvedilol": "Antidiabéticos / Antihipertensivos", "espironolactona": "Antidiabéticos / Antihipertensivos",
     "furosemida": "Antidiabéticos / Antihipertensivos", "torsemida": "Antidiabéticos / Antihipertensivos",
-    "nitroglicerina": "Antidiabéticos / Antihipertensivos", "amlodipino": "Antidiabéticos / Antihipertensivos",
+    "nitroglicerina": "Antidiabéticos / Antihipertensivos",
     "nifedipino": "Antidiabéticos / Antihipertensivos", "verapamilo": "Antidiabéticos / Antihipertensivos",
     "diltiazem": "Antidiabéticos / Antihipertensivos", "clopidogrel": "Antidiabéticos / Antihipertensivos",
     "warfarina": "Antidiabéticos / Antihipertensivos", "heparina": "Antidiabéticos / Antihipertensivos",
@@ -226,10 +226,10 @@ CATEGORIAS_KEYWORDS = {
     "adapaleno": "Dermatológicos", "peróxido de benzoilo": "Dermatológicos",
     "neomicina": "Dermatológicos", "bacitracina": "Dermatológicos", "mupirocina": "Dermatológicos",
     "pimecrolimus": "Dermatológicos", "tacrolimus": "Dermatológicos",
-    "ciclosporina": "Dermatológicos", "metotrexato": "Dermatológicos",
+    "metotrexato": "Dermatológicos",
     "vitamina": "Suplementos / Vitaminas", "magnesio": "Suplementos / Vitaminas", "zinc": "Suplementos / Vitaminas",
     "hierro": "Suplementos / Vitaminas", "calcio": "Suplementos / Vitaminas", "vitamina d": "Suplementos / Vitaminas",
-    "vitamina c": "Suplementos / Vitaminas", "complejo b": "Suplementos / Vitaminas",
+    "vitamina c": "Suplementos / Vitaminas",
     "acido folico": "Suplementos / Vitaminas", "folato": "Suplementos / Vitaminas",
     "vitamina b12": "Suplementos / Vitaminas", "vitamina b6": "Suplementos / Vitaminas",
     "vitamina a": "Suplementos / Vitaminas", "vitamina e": "Suplementos / Vitaminas",
@@ -255,7 +255,7 @@ CATEGORIAS_KEYWORDS = {
     "omega": "Suplementos / Vitaminas", "colágen": "Suplementos / Vitaminas", "biotina": "Suplementos / Vitaminas",
     "complejo b": "Suplementos / Vitaminas",
     "sales": "Suplementos / Vitaminas",
-    "benznidazol": "Antiparasitarios", "metronidazol": "Antiparasitarios",
+    "benznidazol": "Antiparasitarios",
     "albendazol": "Antiparasitarios", "mebendazol": "Antiparasitarios",
     "ivermectina": "Antiparasitarios", "prazicuantel": "Antiparasitarios",
     "nifurtimox": "Antiparasitarios",
@@ -263,8 +263,6 @@ CATEGORIAS_KEYWORDS = {
     "estrógeno": "Hormonales", "progesterona": "Hormonales",
     "testosterona": "Hormonales", "tamoxifeno": "Hormonales",
     "clomifeno": "Hormonales", "danazol": "Hormonales",
-    "metformina": "Antidiabéticos / Antihipertensivos", "glibenclamida": "Antidiabéticos / Antihipertensivos",
-    "insulina": "Antidiabéticos / Antihipertensivos",
     "sitagliptina": "Antidiabéticos / Antihipertensivos", "saxagliptina": "Antidiabéticos / Antihipertensivos",
     "liraglutida": "Antidiabéticos / Antihipertensivos", "semaglutida": "Antidiabéticos / Antihipertensivos",
     "empagliflozina": "Antidiabéticos / Antihipertensivos", "dapagliflozina": "Antidiabéticos / Antihipertensivos",
@@ -280,10 +278,10 @@ CATEGORIAS_KEYWORDS = {
     "letrozol": "Oncología", "anastrozol": "Oncología", "exemestano": "Oncología",
     "bicalutamida": "Oncología", "leuprolide": "Oncología", "goserelina": "Oncología",
     "abiraterona": "Oncología", "enzalutamida": "Oncología",
-    "tamoxifeno": "Oncología", "raloxifeno": "Oncología",
+    "raloxifeno": "Oncología",
     "pamidronato": "Oncología", "zoledronico": "Oncología",
-    "metotrexato": "Oncología", "azatioprina": "Oncología", "micofenolato": "Oncología",
-    "ciclosporina": "Oncología", "tacrolimus": "Oncología",
+    "azatioprina": "Oncología", "micofenolato": "Oncología",
+    "ciclosporina": "Oncología",
     "dexametasona": "Oncología", "prednisona": "Oncología", "prednisolona": "Oncología",
     "metilprednisolona": "Oncología",
     "levodopa": "Neurológicos", "carbidopa": "Neurológicos",
@@ -308,7 +306,6 @@ CATEGORIAS_KEYWORDS = {
     "calcitonina": "Osteoporosis", "denosumab": "Osteoporosis", "teriparatida": "Osteoporosis",
     "alopurinol": "Otros", "colchicina": "Otros", "benzbromarona": "Otros",
     "ácido úrico": "Otros", "ácido urico": "Otros",
-    "tiroxina": "Hormonales", "levotiroxina": "Hormonales",
     "pilocarpina": "Oftalmológicos", "latanoprost": "Oftalmológicos", "timolol": "Oftalmológicos",
     "brimonidina": "Oftalmológicos", "dorzolamida": "Oftalmológicos",
     "artificial lagrimas": "Oftalmológicos", "lacrimal": "Oftalmológicos",
@@ -712,17 +709,17 @@ def reporte_ventas():
     hasta = request.args.get("hasta", "")
     
     conn = get_db()
-    query = "SELECT nombre, laboratorio, cantidad, precio_unitario, total, fecha FROM ventas WHERE 1=1"
+    sql = "SELECT nombre, laboratorio, cantidad, precio_unitario, total, fecha FROM ventas WHERE 1=1"
     params = []
     if desde:
-        query += " AND fecha::date >= %s::date"
+        sql += " AND fecha::date >= %s::date"
         params.append(desde)
     if hasta:
-        query += " AND fecha::date <= %s::date"
+        sql += " AND fecha::date <= %s::date"
         params.append(hasta)
-    query += " ORDER BY fecha DESC"
+    sql += " ORDER BY fecha DESC"
     
-    rows = query(conn, query, params).fetchall()
+    rows = query(conn, sql, params).fetchall()
     conn.close()
     
     data = [dict(r) for r in rows]
@@ -805,17 +802,17 @@ def reporte_utilidad():
     hasta = request.args.get("hasta", "")
     
     conn = get_db()
-    query = "SELECT * FROM ventas WHERE 1=1"
+    sql = "SELECT * FROM ventas WHERE 1=1"
     params = []
     if desde:
-        query += " AND fecha::date >= %s::date"
+        sql += " AND fecha::date >= %s::date"
         params.append(desde)
     if hasta:
-        query += " AND fecha::date <= %s::date"
+        sql += " AND fecha::date <= %s::date"
         params.append(hasta)
-    query += " ORDER BY fecha DESC"
+    sql += " ORDER BY fecha DESC"
     
-    ventas = query(conn, query, params).fetchall()
+    ventas = query(conn, sql, params).fetchall()
     
     inventario_actual = query(conn, "SELECT SUM(cantidad * precio) as costo FROM inventario").fetchone()
     conn.close()
@@ -928,7 +925,7 @@ def dashboard_ventas_semana():
     """).fetchall()
     conn.close()
     
-    existentes = {r["fecha"]: r["total"] for r in rows}
+    existentes = {str(r["fecha"]): r["total"] for r in rows}
     hoy = datetime.date.today()
     return jsonify([
         {
