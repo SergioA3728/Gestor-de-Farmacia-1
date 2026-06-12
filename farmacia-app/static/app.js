@@ -76,7 +76,7 @@ function seleccionarInvima(id, nombre, principio, laboratorio, registro) {
     $("invima-sugerencias").style.display = "none";
     $("inv-buscar-invima").value = "";
     
-    fetch(`/api/inferir-categoria?invima_id=${id}&principio=${encodeURIComponent(principio)}`)
+    fetch(`/api/inferir-categoria?invima_id=${id}&principio=${encodeURIComponent(principio)}&nombre=${encodeURIComponent(nombre)}`)
         .then(r => r.json())
         .then(data => {
             if (data.categoria) {

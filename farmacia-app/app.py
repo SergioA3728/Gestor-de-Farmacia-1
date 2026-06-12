@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template
 import os
 import psycopg2
 import psycopg2.extras
+import unicodedata
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +24,22 @@ MARGEN_POR_CATEGORIA = {
     "Dermatológicos": 0.45,
     "Suplementos / Vitaminas": 0.40,
     "Otros": 0.28,
+    "Higiene Bucal": 0.35,
+    "Higiene Personal": 0.40,
+    "Cuidado Capilar": 0.45,
+    "Cuidado de la Piel": 0.50,
+    "Salud Sexual": 0.40,
+    "Cuidado del Bebe": 0.30,
+    "Primeros Auxilios": 0.35,
+    "Dispositivos Medicos": 0.25,
+    "Descongestionantes": 0.30,
+    "Antiparasitarios": 0.30,
+    "Hormonales": 0.25,
+    "Oncología": 0.20,
+    "Neurológicos": 0.25,
+    "Urológicos": 0.30,
+    "Osteoporosis": 0.25,
+    "Oftalmológicos": 0.35,
 }
 
 # ── HELPER DE QUERIES ────────────────────────────────────
@@ -151,6 +168,8 @@ CATEGORIAS_PREDEFINIDAS = [
     "Higiene Bucal", "Higiene Personal", "Cuidado Capilar",
     "Cuidado de la Piel", "Salud Sexual", "Cuidado del Bebe",
     "Primeros Auxilios", "Dispositivos Medicos", "Descongestionantes",
+    "Antiparasitarios", "Hormonales", "Oncología", "Neurológicos",
+    "Urológicos", "Osteoporosis", "Oftalmológicos",
 ]
 
 CATEGORIAS_KEYWORDS = {
@@ -158,83 +177,178 @@ CATEGORIAS_KEYWORDS = {
     "naproxeno": "Analgésicos / Antiinflamatorios", "ketorolaco": "Analgésicos / Antiinflamatorios",
     "paracetamol": "Analgésicos / Antiinflamatorios", "acetaminofen": "Analgésicos / Antiinflamatorios",
     "tramadol": "Analgésicos / Antiinflamatorios", "morfina": "Analgésicos / Antiinflamatorios",
-    "codeina": "Analgésicos / Antiinflamatorios",
+    "codeina": "Analgésicos / Antiinflamatorios", "aspirina": "Analgésicos / Antiinflamatorios",
+    "metamizol": "Analgésicos / Antiinflamatorios", "piroxicam": "Analgésicos / Antiinflamatorios",
+    "celecoxib": "Analgésicos / Antiinflamatorios", "meloxicam": "Analgésicos / Antiinflamatorios",
+    "flurbiprofeno": "Analgésicos / Antiinflamatorios", "nimesulida": "Analgésicos / Antiinflamatorios",
+    "indometacina": "Analgésicos / Antiinflamatorios", "fenilbutazona": "Analgésicos / Antiinflamatorios",
     "amoxicilina": "Antibióticos", "azitromicina": "Antibióticos", "ciprofloxacino": "Antibióticos",
     "ceftriaxona": "Antibióticos", "amoxicilina clavulanato": "Antibióticos",
     "metronidazol": "Antibióticos", "doxiciclina": "Antibióticos", "penicilina": "Antibióticos",
-    "cefuroxima": "Antibióticos", "levofloxacino": "Antibióticos",
+    "cefuroxima": "Antibióticos", "levofloxacino": "Antibióticos", "cefalexina": "Antibióticos",
+    "sulfametoxazol": "Antibióticos", "trimetoprim": "Antibióticos", "clindamicina": "Antibióticos",
+    "eritromicina": "Antibióticos", "vancomicina": "Antibióticos", "gentamicina": "Antibióticos",
+    "tobramicina": "Antibióticos", "cefepima": "Antibióticos", "meropenem": "Antibióticos",
+    "piperacilina": "Antibióticos", "tazobactam": "Antibióticos", "linezolid": "Antibióticos",
+    "rifampicina": "Antibióticos", "isoniazida": "Antibióticos", "pirazinamida": "Antibióticos",
+    "etambutol": "Antibióticos", "fluconazol": "Antibióticos", "voriconazol": "Antibióticos",
+    "itraconazol": "Antibióticos", "anfotericina": "Antibióticos", "acyclovir": "Antibióticos",
+    "valacyclovir": "Antibióticos", "oseltamivir": "Antibióticos",
     "loratadina": "Antialérgicos", "cetirizina": "Antialérgicos", "desloratadina": "Antialérgicos",
     "hidroxizina": "Antialérgicos", "clorfeniramina": "Antialérgicos", "difenhidramina": "Antialérgicos",
+    "fexofenadina": "Antialérgicos", "levocetirizina": "Antialérgicos",
     "metformina": "Antidiabéticos / Antihipertensivos", "glibenclamida": "Antidiabéticos / Antihipertensivos",
     "insulina": "Antidiabéticos / Antihipertensivos", "lisinopril": "Antidiabéticos / Antihipertensivos",
     "enalapril": "Antidiabéticos / Antihipertensivos", "losartan": "Antidiabéticos / Antihipertensivos",
     "amlodipino": "Antidiabéticos / Antihipertensivos", "hidroclorotiazida": "Antidiabéticos / Antihipertensivos",
     "atorvastatin": "Antidiabéticos / Antihipertensivos", "simvastatin": "Antidiabéticos / Antihipertensivos",
+    "valsartan": "Antidiabéticos / Antihipertensivos", "irbesartan": "Antidiabéticos / Antihipertensivos",
+    "ramipril": "Antidiabéticos / Antihipertensivos", "perindopril": "Antidiabéticos / Antihipertensivos",
+    "bisoprolol": "Antidiabéticos / Antihipertensivos", "metoprolol": "Antidiabéticos / Antihipertensivos",
+    "propranolol": "Antidiabéticos / Antihipertensivos", "atenolol": "Antidiabéticos / Antihipertensivos",
+    "carvedilol": "Antidiabéticos / Antihipertensivos", "espironolactona": "Antidiabéticos / Antihipertensivos",
+    "furosemida": "Antidiabéticos / Antihipertensivos", "torsemida": "Antidiabéticos / Antihipertensivos",
+    "nitroglicerina": "Antidiabéticos / Antihipertensivos", "amlodipino": "Antidiabéticos / Antihipertensivos",
+    "nifedipino": "Antidiabéticos / Antihipertensivos", "verapamilo": "Antidiabéticos / Antihipertensivos",
+    "diltiazem": "Antidiabéticos / Antihipertensivos", "clopidogrel": "Antidiabéticos / Antihipertensivos",
+    "warfarina": "Antidiabéticos / Antihipertensivos", "heparina": "Antidiabéticos / Antihipertensivos",
+    "enoxaparina": "Antidiabéticos / Antihipertensivos", "rivaroxaban": "Antidiabéticos / Antihipertensivos",
+    "apixaban": "Antidiabéticos / Antihipertensivos", "dabigatran": "Antidiabéticos / Antihipertensivos",
     "omeprazol": "Gastrointestinal", "pantoprazol": "Gastrointestinal", "esomeprazol": "Gastrointestinal",
     "ranitidina": "Gastrointestinal", "famotidina": "Gastrointestinal", "metoclopramida": "Gastrointestinal",
     "domperidona": "Gastrointestinal", "loperamida": "Gastrointestinal", "buscapina": "Gastrointestinal",
+    "lansoprazol": "Gastrointestinal", "sucralfato": "Gastrointestinal", "misoprostol": "Gastrointestinal",
+    "bismuto": "Gastrointestinal", "simeticona": "Gastrointestinal", "lactulosa": "Gastrointestinal",
+    "bisacodilo": "Gastrointestinal", "polietilenglicol": "Gastrointestinal",
     "hidrocortisona": "Dermatológicos", "betametasona": "Dermatológicos", "clotrimazol": "Dermatológicos",
     "miconazol": "Dermatológicos", "aceite mineral": "Dermatológicos", "urea": "Dermatológicos",
+    "acido retinoico": "Dermatológicos", "retinol": "Dermatológicos", "tretinoina": "Dermatológicos",
+    "adapaleno": "Dermatológicos", "peróxido de benzoilo": "Dermatológicos",
+    "neomicina": "Dermatológicos", "bacitracina": "Dermatológicos", "mupirocina": "Dermatológicos",
+    "pimecrolimus": "Dermatológicos", "tacrolimus": "Dermatológicos",
+    "ciclosporina": "Dermatológicos", "metotrexato": "Dermatológicos",
     "vitamina": "Suplementos / Vitaminas", "magnesio": "Suplementos / Vitaminas", "zinc": "Suplementos / Vitaminas",
     "hierro": "Suplementos / Vitaminas", "calcio": "Suplementos / Vitaminas", "vitamina d": "Suplementos / Vitaminas",
     "vitamina c": "Suplementos / Vitaminas", "complejo b": "Suplementos / Vitaminas",
-    "shampoo": "Dermatológicos", "acondicionador": "Dermatológicos", "jabón": "Dermatológicos",
-    "gel de baño": "Dermatológicos", "pasta dental": "Dermatológicos", "desodorante": "Dermatológicos",
-    "antitranspirante": "Dermatológicos", "crema": "Dermatológicos", "protector solar": "Dermatológicos",
-    "bálsamo labial": "Dermatológicos", "brillo de labios": "Dermatológicos", "lápiz de labios": "Dermatológicos",
-    "base": "Dermatológicos", "rímel": "Dermatológicos", "sombra de ojos": "Dermatológicos",
-    "corrector": "Dermatológicos", "polvora": "Dermatológicos", "esmalte": "Dermatológicos",
-    "quitaesmalte": "Dermatológicos", "mascarilla": "Dermatológicos", "gel capilar": "Dermatológicos",
-    "espuma": "Dermatológicos", "cera": "Dermatológicos", "spray": "Dermatológicos",
-    "tinte": "Dermatológicos", "gel de afeitar": "Dermatológicos", "post-afeitar": "Dermatológicos",
-    "crema de manos": "Dermatológicos", "loción": "Dermatológicos", "aceite corporal": "Dermatológicos",
-    "crema facial": "Dermatológicos", "crema corporal": "Dermatológicos", "crema hidratante": "Dermatológicos",
-    "aloe": "Dermatológicos", "glicerina": "Dermatológicos", "manteca": "Dermatológicos",
-    "shea": "Dermatológicos", "coco": "Dermatológicos", "vitamina e": "Dermatológicos",
-    "colágeno": "Dermatológicos", "calendula": "Dermatológicos",
-    "mentol": "Dermatológicos", "aguay": "Dermatológicos",
-    "condón": "Otros", "preservativo": "Otros", "lubricante": "Otros", "espermicida": "Otros",
-    "test de embarazo": "Otros", "copa menstrual": "Otros", "toalla": "Otros", "tampón": "Otros",
-    "pañal": "Cuidado del Bebe", "toallitas": "Cuidado del Bebe", "gasa": "Primeros Auxilios", "venda": "Primeros Auxilios", "curita": "Primeros Auxilios",
-    "aposito": "Primeros Auxilios", "algodón": "Primeros Auxilios", "jeringa": "Dispositivos Medicos", "aguja": "Dispositivos Medicos", "guante": "Primeros Auxilios",
-    "alcohol": "Primeros Auxilios", "suero": "Primeros Auxilios", "yodo": "Primeros Auxilios", "peróxido": "Primeros Auxilios",
-    "termómetro": "Dispositivos Medicos", "tensiómetro": "Dispositivos Medicos", "glucómetro": "Dispositivos Medicos", "tiras reactivas": "Dispositivos Medicos",
-    "tijeras": "Primeros Auxilios", "pinzas": "Primeros Auxilios", "repele": "Otros", "bombilla": "Otros",
-    "pasta dental": "Higiene Bucal", "cepillo dental": "Higiene Bucal", "enjuague bucal": "Higiene Bucal", "hilo dental": "Higiene Bucal",
-    "desodorante": "Higiene Personal", "antitranspirante": "Higiene Personal", "jabón": "Higiene Personal", "jabon": "Higiene Personal",
-    "shampoo": "Cuidado Capilar", "acondicionador": "Cuidado Capilar", "gel capilar": "Cuidado Capilar", "mascarilla capilar": "Cuidado Capilar",
-    "crema facial": "Cuidado de la Piel", "protector solar": "Cuidado de la Piel", "bálsamo labial": "Cuidado de la Piel", "loción": "Cuidado de la Piel",
-    "condón": "Salud Sexual", "condon": "Salud Sexual", "preservativo": "Salud Sexual", "lubricante": "Salud Sexual",
+    "acido folico": "Suplementos / Vitaminas", "folato": "Suplementos / Vitaminas",
+    "vitamina b12": "Suplementos / Vitaminas", "vitamina b6": "Suplementos / Vitaminas",
+    "vitamina a": "Suplementos / Vitaminas", "vitamina e": "Suplementos / Vitaminas",
+    "selenio": "Suplementos / Vitaminas", "cromo": "Suplementos / Vitaminas",
+    "potasio": "Suplementos / Vitaminas", "flúor": "Suplementos / Vitaminas",
+    "shampoo": "Cuidado Capilar", "acondicionador": "Cuidado Capilar", "gel capilar": "Cuidado Capilar",
+    "mascarilla capilar": "Cuidado Capilar", "crema de manos": "Cuidado de la Piel",
+    "protector solar": "Cuidado de la Piel", "crema facial": "Cuidado de la Piel",
+    "bálsamo labial": "Cuidado de la Piel", "loción": "Cuidado de la Piel",
+    "crema corporal": "Cuidado de la Piel", "crema hidratante": "Cuidado de la Piel",
+    "pasta dental": "Higiene Bucal", "cepillo dental": "Higiene Bucal",
+    "enjuague bucal": "Higiene Bucal", "hilo dental": "Higiene Bucal",
+    "desodorante": "Higiene Personal", "antitranspirante": "Higiene Personal",
+    "jabón": "Higiene Personal", "jabon": "Higiene Personal",
+    "condón": "Salud Sexual", "condon": "Salud Sexual", "preservativo": "Salud Sexual",
+    "lubricante": "Salud Sexual",
     "spray nasal": "Descongestionantes", "descongestionante": "Descongestionantes",
+    "guaifenesina": "Descongestionantes", "pseudoefedrina": "Descongestionantes",
+    "fenilefrina": "Descongestionantes", "oximetazolina": "Descongestionantes",
+    "montelukast": "Descongestionantes", "budesonida": "Descongestionantes",
+    "salbutamol": "Descongestionantes", "ipratropio": "Descongestionantes",
+    "teofilina": "Descongestionantes", "formoterol": "Descongestionantes",
     "omega": "Suplementos / Vitaminas", "colágen": "Suplementos / Vitaminas", "biotina": "Suplementos / Vitaminas",
     "complejo b": "Suplementos / Vitaminas",
-    "sales": "Suplementos / Vitaminas"
+    "sales": "Suplementos / Vitaminas",
+    "benznidazol": "Antiparasitarios", "metronidazol": "Antiparasitarios",
+    "albendazol": "Antiparasitarios", "mebendazol": "Antiparasitarios",
+    "ivermectina": "Antiparasitarios", "prazicuantel": "Antiparasitarios",
+    "nifurtimox": "Antiparasitarios",
+    "levotiroxina": "Hormonales", "tiroxina": "Hormonales",
+    "estrógeno": "Hormonales", "progesterona": "Hormonales",
+    "testosterona": "Hormonales", "tamoxifeno": "Hormonales",
+    "clomifeno": "Hormonales", "danazol": "Hormonales",
+    "metformina": "Antidiabéticos / Antihipertensivos", "glibenclamida": "Antidiabéticos / Antihipertensivos",
+    "insulina": "Antidiabéticos / Antihipertensivos",
+    "sitagliptina": "Antidiabéticos / Antihipertensivos", "saxagliptina": "Antidiabéticos / Antihipertensivos",
+    "liraglutida": "Antidiabéticos / Antihipertensivos", "semaglutida": "Antidiabéticos / Antihipertensivos",
+    "empagliflozina": "Antidiabéticos / Antihipertensivos", "dapagliflozina": "Antidiabéticos / Antihipertensivos",
+    "canagliflozina": "Antidiabéticos / Antihipertensivos",
+    "pioglitazona": "Antidiabéticos / Antihipertensivos", "rosiglitazona": "Antidiabéticos / Antihipertensivos",
+    "glimepirida": "Antidiabéticos / Antihipertensivos", "glipizida": "Antidiabéticos / Antihipertensivos",
+    "paclitaxel": "Oncología", "docetaxel": "Oncología", "doxorubicina": "Oncología",
+    "ciclofosfamida": "Oncología", "fluorouracilo": "Oncología", "capecitabina": "Oncología",
+    "cisplatino": "Oncología", "carboplatino": "Oncología", "oxaliplatino": "Oncología",
+    "bevacizumab": "Oncología", "trastuzumab": "Oncología", "rituximab": "Oncología",
+    "pembrolizumab": "Oncología", "nivolumab": "Oncología", "atezolizumab": "Oncología",
+    "imatinib": "Oncología", "erlotinib": "Oncología", "gefitinib": "Oncología",
+    "letrozol": "Oncología", "anastrozol": "Oncología", "exemestano": "Oncología",
+    "bicalutamida": "Oncología", "leuprolide": "Oncología", "goserelina": "Oncología",
+    "abiraterona": "Oncología", "enzalutamida": "Oncología",
+    "tamoxifeno": "Oncología", "raloxifeno": "Oncología",
+    "pamidronato": "Oncología", "zoledronico": "Oncología",
+    "metotrexato": "Oncología", "azatioprina": "Oncología", "micofenolato": "Oncología",
+    "ciclosporina": "Oncología", "tacrolimus": "Oncología",
+    "dexametasona": "Oncología", "prednisona": "Oncología", "prednisolona": "Oncología",
+    "metilprednisolona": "Oncología",
+    "levodopa": "Neurológicos", "carbidopa": "Neurológicos",
+    "bromocriptina": "Neurológicos", "pramipexol": "Neurológicos", "ropinirol": "Neurológicos",
+    "donepezilo": "Neurológicos", "rivastigmina": "Neurológicos", "memantina": "Neurológicos",
+    "carbamazepina": "Neurológicos", "valproico": "Neurológicos", "lamotrigina": "Neurológicos",
+    "levetiracetam": "Neurológicos", "fenitoina": "Neurológicos", "topiramato": "Neurológicos",
+    "gabapentina": "Neurológicos", "pregabalina": "Neurológicos",
+    "duloxetina": "Neurológicos", "venlafaxina": "Neurológicos", "amitriptilina": "Neurológicos",
+    "fluoxetina": "Neurológicos", "sertralina": "Neurológicos", "escitalopram": "Neurológicos",
+    "citalopram": "Neurológicos", "paroxetina": "Neurológicos",
+    "alprazolam": "Neurológicos", "lorazepam": "Neurológicos", "diazepam": "Neurológicos",
+    "clonazepam": "Neurológicos", "zolpidem": "Neurológicos",
+    "quetiapina": "Neurológicos", "olanzapina": "Neurológicos", "risperidona": "Neurológicos",
+    "aripiprazol": "Neurológicos", "haloperidol": "Neurológicos", "clozapina": "Neurológicos",
+    "litio": "Neurológicos",
+    "tadalafil": "Urológicos", "sildenafilo": "Urológicos", "finasterida": "Urológicos",
+    "dutasterida": "Urológicos", "tamsulosina": "Urológicos", "silodosina": "Urológicos",
+    "solifenacina": "Urológicos", "tolterodina": "Urológicos", "oxibutinina": "Urológicos",
+    "dapoxetina": "Urológicos",
+    "alendronato": "Osteoporosis", "risedronato": "Osteoporosis", "etidronato": "Osteoporosis",
+    "calcitonina": "Osteoporosis", "denosumab": "Osteoporosis", "teriparatida": "Osteoporosis",
+    "alopurinol": "Otros", "colchicina": "Otros", "benzbromarona": "Otros",
+    "ácido úrico": "Otros", "ácido urico": "Otros",
+    "tiroxina": "Hormonales", "levotiroxina": "Hormonales",
+    "pilocarpina": "Oftalmológicos", "latanoprost": "Oftalmológicos", "timolol": "Oftalmológicos",
+    "brimonidina": "Oftalmológicos", "dorzolamida": "Oftalmológicos",
+    "artificial lagrimas": "Oftalmológicos", "lacrimal": "Oftalmológicos",
 }
 
-def inferir_categoria(principio):
-    if not principio:
+def _normalizar(texto):
+    if not texto:
         return ""
-    principio_lower = principio.lower()
+    nfkd = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def inferir_categoria(principio, nombre=""):
+    campos = _normalizar(f"{principio or ''} {nombre or ''}").lower().strip()
+    if not campos:
+        return ""
     for kw, cat in CATEGORIAS_KEYWORDS.items():
-        if kw in principio_lower:
+        if kw in campos:
             return cat
-    return ""
+    return "Otros"
 
 @app.route("/api/inferir-categoria", methods=["GET"])
 def inferir_categoria_api():
     invima_id = request.args.get("invima_id", "")
     principio = request.args.get("principio", "")
+    nombre = request.args.get("nombre", "")
 
     if invima_id:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT categoria FROM invima WHERE id = %s", (invima_id,))
+        cur.execute("SELECT categoria, producto FROM invima WHERE id = %s", (invima_id,))
         row = cur.fetchone()
         conn.close()
-        if row and row[0]:
-            return jsonify({"categoria": row[0], "fuente": "invima"})
+        if row:
+            cat_bd = row[0] or ""
+            if cat_bd:
+                return jsonify({"categoria": cat_bd, "fuente": "invima"})
+            return jsonify({"categoria": inferir_categoria(row[1], row[1]), "fuente": "inferred"})
 
-    return jsonify({"categoria": inferir_categoria(principio), "fuente": "keyword"})
+    return jsonify({"categoria": inferir_categoria(principio, nombre), "fuente": "keyword"})
 
 @app.route("/api/categorias", methods=["GET"])
 def categorias_listar():
@@ -292,7 +406,7 @@ def inventario_agregar():
         conn.close()
         return jsonify({"ok": True, "accion": "actualizado"})
     else:
-        categoria = d.get("categoria", "") or inferir_categoria(d.get("principio", ""))
+        categoria = d.get("categoria", "") or inferir_categoria(d.get("principio", ""), d.get("nombre", ""))
         query(conn, """
             INSERT INTO inventario
                 (invima_id, catalogo_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
@@ -400,7 +514,7 @@ def inventario_importar():
             "precio": float(row.get("precio", 0)),
             "fecha_vencimiento": str(row.get("fecha_vencimiento", ""))[:10] if pd.notna(row.get("fecha_vencimiento")) else "",
             "lote": str(row.get("lote", "")) if pd.notna(row.get("lote")) else "",
-            "categoria": str(row.get("categoria", "")) if pd.notna(row.get("categoria")) else inferir_categoria(row.get("principio", "")),
+            "categoria": str(row.get("categoria", "")) if pd.notna(row.get("categoria")) else inferir_categoria(row.get("principio", ""), nombre),
             "invima_id": invima_match["id"] if invima_match else None,
             "match": invima_match is not None
         }
@@ -456,11 +570,11 @@ def inventario_confirmar_importacion():
 @app.route("/api/inventario/recategorizar", methods=["POST"])
 def inventario_recategorizar():
     conn = get_db()
-    productos = query(conn, "SELECT id, principio FROM inventario WHERE categoria IS NULL OR categoria = ''").fetchall()
+    productos = query(conn, "SELECT id, principio, nombre FROM inventario WHERE categoria IS NULL OR categoria = ''").fetchall()
     
     actualizados = 0
     for p in productos:
-        nueva_cat = inferir_categoria(p["principio"])
+        nueva_cat = inferir_categoria(p["principio"], p["nombre"])
         if nueva_cat:
             query(conn, "UPDATE inventario SET categoria = %s WHERE id = %s", (nueva_cat, p["id"]))
             actualizados += 1
