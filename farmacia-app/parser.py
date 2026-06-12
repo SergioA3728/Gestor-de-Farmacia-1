@@ -1,34 +1,30 @@
 import pdfplumber
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import os
 
 PDF_PATH = "Listado de Registros Sanitarios Vigentes de Medicamentos con Principio Activo - INVIMA.pdf"
-DB_PATH = "farmacia.db"
+
 
 def limpiar(texto):
     if texto is None:
         return ""
     return " ".join(texto.split())
 
-def crear_base_de_datos(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS invima (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            expediente       TEXT,
-            producto         TEXT,
-            principio_activo TEXT,
-            registro         TEXT,
-            estado           TEXT,
-            modalidad        TEXT,
-            titular          TEXT
-        )
-    """)
-    conn.commit()
 
-def parsear_pdf(pdf_path, conn):
+def get_db():
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        url = input("DATABASE_URL no está configurada. Pégala ahora: ").strip()
+    if not url:
+        raise RuntimeError("No se proporcionó DATABASE_URL.")
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+
+
+def parsear_pdf(pdf_path):
     registros = []
-    columnas = ["EXPEDIENTE", "PRODUCTO", "PRINCIPIO_ACTIVO",
-                "REGISTRO_SANITARIO", "ESTADO_REGISTRO", "MODALIDAD", "TITULAR"]
 
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
@@ -40,7 +36,6 @@ def parsear_pdf(pdf_path, conn):
             for fila in tabla:
                 if fila is None or len(fila) < 7:
                     continue
-                # Saltar filas de encabezado
                 if fila[0] and "EXPEDIENTE" in str(fila[0]):
                     continue
                 expediente       = limpiar(fila[0])
@@ -51,7 +46,6 @@ def parsear_pdf(pdf_path, conn):
                 modalidad        = limpiar(fila[5])
                 titular          = limpiar(fila[6])
 
-                # Solo guardar filas que tengan registro INVIMA
                 if "INVIMA" not in registro:
                     continue
 
@@ -60,23 +54,69 @@ def parsear_pdf(pdf_path, conn):
                     registro, estado, modalidad, titular
                 ))
 
-    conn.executemany("""
-        INSERT INTO invima
-            (expediente, producto, principio_activo, registro, estado, modalidad, titular)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, registros)
+    return registros
+
+
+def importar_a_postgresql(registros):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) AS total FROM invima")
+    existentes = cur.fetchone()["total"]
+
+    if existentes > 0:
+        print(f"\nLa tabla 'invima' ya tiene {existentes} registros.")
+        resp = input("¿Deseas ELIMINAR los existentes e importar de nuevo? (s/n): ").strip().lower()
+        if resp != "s":
+            print("Cancelado. No se importaron datos.")
+            conn.close()
+            return
+        cur.execute("DELETE FROM invima")
+        print("Registros existentes eliminados.")
+
+    insertados = 0
+    batch_size = 500
+    for i in range(0, len(registros), batch_size):
+        batch = registros[i:i + batch_size]
+        cur.executemany("""
+            INSERT INTO invima
+                (expediente, producto, principio_activo, registro, estado, modalidad, titular)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, batch)
+        insertados += len(batch)
+        print(f"Insertados {insertados}/{len(registros)}...", end="\r")
+
     conn.commit()
-    return len(registros)
+    conn.close()
+    return insertados
+
 
 if __name__ == "__main__":
+    import sys
+
     if not os.path.exists(PDF_PATH):
         print(f"Error: no encuentro el archivo '{PDF_PATH}'")
         print("Verifica que el PDF esté en la misma carpeta que este script.")
-        exit(1)
+        sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
-    crear_base_de_datos(conn)
-    total = parsear_pdf(PDF_PATH, conn)
-    conn.close()
+    print("Parseando PDF de INVIMA...")
+    registros = parsear_pdf(PDF_PATH)
+    print(f"\nSe encontraron {len(registros)} registros con INVIMA válido.")
 
-    print(f"\nListo. Se importaron {total} registros a '{DB_PATH}'")
+    if not registros:
+        print("No se encontraron registros. Verifica el PDF.")
+        sys.exit(1)
+
+    if "--count" in sys.argv:
+        print(f"\nTotal de registros disponibles: {len(registros)}")
+        sys.exit(0)
+
+    resp = input("¿Importar a PostgreSQL? (s/n): ").strip().lower()
+    if resp != "s":
+        print("Cancelado.")
+        sys.exit(0)
+
+    importados = importar_a_postgresql(registros)
+    if importados:
+        print(f"\nListo. Se importaron {importados} registros a PostgreSQL.")
+    sys.exit(0)

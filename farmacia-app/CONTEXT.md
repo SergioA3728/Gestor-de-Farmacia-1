@@ -1,7 +1,7 @@
 # Gestor Farmacia - Contexto del Proyecto
 
-> **Última actualización:** 2026-06-05 (sesión 5)
-> **Estado:** deployado en Render. PostgreSQL. Premium = OFF.
+> **Última actualización:** 2026-06-12 (sesión 6)
+> **Estado:** deployado en Render. PostgreSQL. Premium = OFF. Catálogo INVIMA = 7,289 registros.
 > **Producción:** https://gestor-de-farmacia-1.onrender.com (plan free, cold start 30-60s)
 > Para revisar cambios de la última sesión: `docs/INFORME_SESION.md`.
 
@@ -12,7 +12,7 @@
 - **Sesiones de cambios**: ver `docs/INFORME_SESION.md` después de cada sesión
 
 ## Stack Tecnológico
-- **Backend**: Python + Flask + **PostgreSQL** + psycopg2 + Pandas + OpenPyXL
+- **Backend**: Python + Flask + **PostgreSQL** + psycopg2 + Pandas + OpenPyXL + pdfplumber
 - **Frontend**: HTML + CSS vanilla + JavaScript vanilla
 - **Sin frameworks** (ni React, ni Vue)
 - **AI Assistants**: skills `clean-code` y `session-report` activas en `.agents/skills/`
@@ -24,6 +24,7 @@
 ```
 farmacia-app/
 ├── app.py                 # Backend Flask - rutas API + página principal
+├── parser.py              # Parser de PDF INVIMA → PostgreSQL
 ├── .env.example           # Plantilla de variables de entorno (DATABASE_URL)
 ├── requirements.txt       # Dependencias: flask, pandas, openpyxl, werkzeug, psycopg2-binary
 ├── CONTEXT.md             # Este archivo
@@ -57,6 +58,10 @@ farmacia-app/
 2. **ventas**: id, inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha
 3. **invima**: datos de productos INVIMA para autocompletar
 4. **catalogo**: id, nombre, principio, laboratorio, descripcion
+
+### Semilla de datos:
+- **invima**: 7,289 registros importados desde el PDF oficial de INVIMA (parser.py). No más hardcoded.
+- **catalogo**: se siembra vacía, se llena con el catálogo propio del usuario.
 
 ### Constantes (app.py):
 - `STOCK_MINIMO = 10`
@@ -150,7 +155,7 @@ Analgésicos / Antibióticos / Antialérgicos / Antidiabéticos / Gastrointestin
 1. **`PREMIUM_ENABLED = False`** — el módulo analíticas existe pero está bloqueado. Para activarlo: cambiar el flag en `app.py` y reiniciar.
 2. **5 endpoints de analítica** (no 4) — uno por análisis, SRP.
 3. **Gráfica con CSS puro** — sin librerías JS externas.
-4. **Catálogo hardcoded de INVIMA** — 158 productos comunes sembrados en `init_db()`.
+4. **Catálogo hardcoded de INVIMA** — ~~158 productos~~ **7,289 productos** reales importados desde PDF oficial de INVIMA (parser.py). Búsqueda case-insensitive (ILIKE).
 5. **No hay tests automatizados** — verificado manualmente con Flask test client.
 6. **No hay sistema de autenticación** — single user, local-only.
 7. **PostgreSQL como única BD** (sesión 4) — sin fallback a SQLite. Conexión vía `DATABASE_URL`. `psycopg2` con `RealDictCursor`.
@@ -182,6 +187,7 @@ Luego abrir: http://127.0.0.1:5000
 - [ ] Sistema de autenticación multi-usuario
 - [ ] Caché de consultas de analítica (Redis o en memoria)
 - [x] Deploy a Render (web service + PostgreSQL free tier) — hecho en sesión 5
+- [x] Importar catálogo INVIMA completo (7,289 registros desde PDF oficial) — hecho en sesión 6
 
 ## Notas
 
