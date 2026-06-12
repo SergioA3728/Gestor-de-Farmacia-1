@@ -343,10 +343,10 @@ def inferir_categoria_api():
         row = cur.fetchone()
         conn.close()
         if row:
-            cat_bd = row[0] or ""
+            cat_bd = row["categoria"] or ""
             if cat_bd:
                 return jsonify({"categoria": cat_bd, "fuente": "invima"})
-            return jsonify({"categoria": inferir_categoria(row[1], row[1]), "fuente": "inferred"})
+            return jsonify({"categoria": inferir_categoria(row["producto"], row["producto"]), "fuente": "inferred"})
 
     return jsonify({"categoria": inferir_categoria(principio, nombre), "fuente": "keyword"})
 
