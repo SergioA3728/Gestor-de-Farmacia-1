@@ -76,11 +76,18 @@ function seleccionarInvima(id, nombre, principio, laboratorio, registro) {
     $("invima-sugerencias").style.display = "none";
     $("inv-buscar-invima").value = "";
     
-    fetch(`/api/inferir-categoria?principio=${encodeURIComponent(principio)}`)
+    fetch(`/api/inferir-categoria?invima_id=${id}&principio=${encodeURIComponent(principio)}`)
         .then(r => r.json())
         .then(data => {
             if (data.categoria) {
                 $("inv-categoria").value = data.categoria;
+            }
+            if (data.fuente === "invima") {
+                $("inv-categoria").setAttribute("readonly", true);
+                $("inv-categoria").classList.add("field-locked");
+            } else {
+                $("inv-categoria").removeAttribute("readonly");
+                $("inv-categoria").classList.remove("field-locked");
             }
         });
 }
@@ -453,13 +460,17 @@ async function editarInventario(id) {
     if (producto.invima_id) {
         $("inv-principio").setAttribute("readonly", true);
         $("inv-laboratorio").setAttribute("readonly", true);
+        $("inv-categoria").setAttribute("readonly", true);
         $("inv-principio").classList.add("field-locked");
         $("inv-laboratorio").classList.add("field-locked");
+        $("inv-categoria").classList.add("field-locked");
     } else {
         $("inv-principio").removeAttribute("readonly");
         $("inv-laboratorio").removeAttribute("readonly");
+        $("inv-categoria").removeAttribute("readonly");
         $("inv-principio").classList.remove("field-locked");
         $("inv-laboratorio").classList.remove("field-locked");
+        $("inv-categoria").classList.remove("field-locked");
     }
     
     $("modal-agregar").style.display = "flex";
@@ -500,8 +511,10 @@ function limpiarFormulario() {
     
     $("inv-principio").removeAttribute("readonly");
     $("inv-laboratorio").removeAttribute("readonly");
+    $("inv-categoria").removeAttribute("readonly");
     $("inv-principio").classList.remove("field-locked");
     $("inv-laboratorio").classList.remove("field-locked");
+    $("inv-categoria").classList.remove("field-locked");
     
     $("grupo-presentacion").style.display = "block";
     $("grupo-cantidad-directa").style.display = "none";

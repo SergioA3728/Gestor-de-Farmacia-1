@@ -147,7 +147,10 @@ def invima_buscar():
 CATEGORIAS_PREDEFINIDAS = [
     "Analgésicos / Antiinflamatorios", "Antibióticos", "Antialérgicos",
     "Antidiabéticos / Antihipertensivos", "Gastrointestinal", "Dermatológicos",
-    "Suplementos / Vitaminas", "Otros"
+    "Suplementos / Vitaminas", "Otros",
+    "Higiene Bucal", "Higiene Personal", "Cuidado Capilar",
+    "Cuidado de la Piel", "Salud Sexual", "Cuidado del Bebe",
+    "Primeros Auxilios", "Dispositivos Medicos", "Descongestionantes",
 ]
 
 CATEGORIAS_KEYWORDS = {
@@ -192,11 +195,17 @@ CATEGORIAS_KEYWORDS = {
     "mentol": "Dermatológicos", "aguay": "Dermatológicos",
     "condón": "Otros", "preservativo": "Otros", "lubricante": "Otros", "espermicida": "Otros",
     "test de embarazo": "Otros", "copa menstrual": "Otros", "toalla": "Otros", "tampón": "Otros",
-    "pañal": "Otros", "toallitas": "Otros", "gasa": "Otros", "venda": "Otros", "curita": "Otros",
-    "aposito": "Otros", "algodón": "Otros", "jeringa": "Otros", "aguja": "Otros", "guante": "Otros",
-    "alcohol": "Otros", "suero": "Otros", "yodo": "Otros", "peróxido": "Otros",
-    "termómetro": "Otros", "tensiómetro": "Otros", "glucómetro": "Otros", "tiras": "Otros",
-    "tijeras": "Otros", "pinzas": "Otros", "repele": "Otros", "bombilla": "Otros",
+    "pañal": "Cuidado del Bebe", "toallitas": "Cuidado del Bebe", "gasa": "Primeros Auxilios", "venda": "Primeros Auxilios", "curita": "Primeros Auxilios",
+    "aposito": "Primeros Auxilios", "algodón": "Primeros Auxilios", "jeringa": "Dispositivos Medicos", "aguja": "Dispositivos Medicos", "guante": "Primeros Auxilios",
+    "alcohol": "Primeros Auxilios", "suero": "Primeros Auxilios", "yodo": "Primeros Auxilios", "peróxido": "Primeros Auxilios",
+    "termómetro": "Dispositivos Medicos", "tensiómetro": "Dispositivos Medicos", "glucómetro": "Dispositivos Medicos", "tiras reactivas": "Dispositivos Medicos",
+    "tijeras": "Primeros Auxilios", "pinzas": "Primeros Auxilios", "repele": "Otros", "bombilla": "Otros",
+    "pasta dental": "Higiene Bucal", "cepillo dental": "Higiene Bucal", "enjuague bucal": "Higiene Bucal", "hilo dental": "Higiene Bucal",
+    "desodorante": "Higiene Personal", "antitranspirante": "Higiene Personal", "jabón": "Higiene Personal", "jabon": "Higiene Personal",
+    "shampoo": "Cuidado Capilar", "acondicionador": "Cuidado Capilar", "gel capilar": "Cuidado Capilar", "mascarilla capilar": "Cuidado Capilar",
+    "crema facial": "Cuidado de la Piel", "protector solar": "Cuidado de la Piel", "bálsamo labial": "Cuidado de la Piel", "loción": "Cuidado de la Piel",
+    "condón": "Salud Sexual", "condon": "Salud Sexual", "preservativo": "Salud Sexual", "lubricante": "Salud Sexual",
+    "spray nasal": "Descongestionantes", "descongestionante": "Descongestionantes",
     "omega": "Suplementos / Vitaminas", "colágen": "Suplementos / Vitaminas", "biotina": "Suplementos / Vitaminas",
     "complejo b": "Suplementos / Vitaminas",
     "sales": "Suplementos / Vitaminas"
@@ -213,8 +222,19 @@ def inferir_categoria(principio):
 
 @app.route("/api/inferir-categoria", methods=["GET"])
 def inferir_categoria_api():
+    invima_id = request.args.get("invima_id", "")
     principio = request.args.get("principio", "")
-    return jsonify({"categoria": inferir_categoria(principio)})
+
+    if invima_id:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT categoria FROM invima WHERE id = %s", (invima_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            return jsonify({"categoria": row[0], "fuente": "invima"})
+
+    return jsonify({"categoria": inferir_categoria(principio), "fuente": "keyword"})
 
 @app.route("/api/categorias", methods=["GET"])
 def categorias_listar():
