@@ -299,6 +299,30 @@
                             <label for="venta-cantidad">Cantidad a vender</label>
                             <input type="number" id="venta-cantidad" min="1" value="1">
                         </div>
+                        <div class="form-group">
+                            <label for="venta-metodo-pago">Método de pago</label>
+                            <select id="venta-metodo-pago">
+                                <option value="efectivo">Efectivo</option>
+                                <option value="tarjeta_debito">Tarjeta débito</option>
+                                <option value="tarjeta_credito">Tarjeta crédito</option>
+                                <option value="transferencia">Transferencia</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="venta-es-credito"> Venta a crédito
+                            </label>
+                        </div>
+                        <div id="credito-campos" style="display: none;">
+                            <div class="form-group">
+                                <label for="venta-cliente-nombre">Nombre del cliente</label>
+                                <input type="text" id="venta-cliente-nombre" placeholder="Nombre completo">
+                            </div>
+                            <div class="form-group">
+                                <label for="venta-cliente-tel">Teléfono del cliente</label>
+                                <input type="text" id="venta-cliente-tel" placeholder="Ej: 300 123 4567">
+                            </div>
+                        </div>
                         <div class="form-actions">
                             <button class="btn btn-primary" id="venta-guardar">Registrar venta</button>
                         </div>
@@ -309,6 +333,7 @@
                 <div class="venta-detalle">
                     <div class="venta-detalle-header">
                         <h2 class="card-title">Últimas ventas</h2>
+                        <button class="btn btn-secondary" id="btn-creditos-abiertos" style="font-size:13px;">Créditos abiertos</button>
                     </div>
                     <div class="venta-detalle-body" id="ventas-historial">
                         <div class="empty-state">
@@ -504,6 +529,10 @@
                     <input type="number" id="inv-precio" min="0" value="0">
                 </div>
                 <div class="form-group">
+                    <label for="inv-precio-costo">Precio de costo (opcional)</label>
+                    <input type="number" id="inv-precio-costo" min="0" value="" placeholder="0">
+                </div>
+                <div class="form-group">
                     <label for="inv-lote">Lote</label>
                     <input type="text" id="inv-lote" placeholder="Ej: L2024-001">
                 </div>
@@ -522,6 +551,21 @@
         <div class="modal-footer">
             <button class="btn btn-secondary" id="inv-limpiar">Limpiar</button>
             <button class="btn btn-primary" id="inv-guardar">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal créditos -->
+<div id="modal-creditos" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="creditos-title">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="creditos-title">Créditos abiertos</h2>
+            <button class="modal-cerrar" onclick="document.getElementById('modal-creditos').style.display='none'" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="creditos-lista">
+                <div class="empty-state"><p>No hay créditos abiertos</p></div>
+            </div>
         </div>
     </div>
 </div>

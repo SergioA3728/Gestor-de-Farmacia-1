@@ -129,6 +129,27 @@ def init_db():
     _ensure_column(conn, "inventario", "fecha_vencimiento", "TEXT")
     _ensure_column(conn, "inventario", "lote", "TEXT")
     _ensure_column(conn, "inventario", "categoria", "TEXT")
+    _ensure_column(conn, "inventario", "precio_costo", "DOUBLE PRECISION")
+
+    _ensure_column(conn, "ventas", "metodo_pago", "TEXT DEFAULT 'efectivo'")
+    _ensure_column(conn, "ventas", "es_credito", "BOOLEAN DEFAULT FALSE")
+    _ensure_column(conn, "ventas", "cliente_nombre", "TEXT")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS creditos (
+            id               SERIAL PRIMARY KEY,
+            cliente_nombre   TEXT,
+            cliente_tel      TEXT,
+            inventario_id    INTEGER,
+            nombre_producto  TEXT,
+            cantidad         INTEGER,
+            total            DOUBLE PRECISION,
+            abonado          DOUBLE PRECISION DEFAULT 0,
+            saldo            DOUBLE PRECISION,
+            fecha            TEXT,
+            estado           TEXT DEFAULT 'pendiente'
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -396,9 +417,9 @@ def inventario_agregar():
 
     if existing:
         query(conn, """
-            UPDATE inventario SET cantidad = cantidad + %s, precio = %s
+            UPDATE inventario SET cantidad = cantidad + %s, precio = %s, precio_costo = %s
             WHERE id = %s
-        """, (d["cantidad"], d["precio"], existing["id"]))
+        """, (d["cantidad"], d["precio"], d.get("precio_costo"), existing["id"]))
         conn.commit()
         conn.close()
         return jsonify({"ok": True, "accion": "actualizado"})
@@ -406,12 +427,13 @@ def inventario_agregar():
         categoria = d.get("categoria", "") or inferir_categoria(d.get("principio", ""), d.get("nombre", ""))
         query(conn, """
             INSERT INTO inventario
-                (invima_id, catalogo_id, nombre, principio, laboratorio, registro, cantidad, precio, fecha_vencimiento, lote, categoria)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (invima_id, catalogo_id, nombre, principio, laboratorio, registro, cantidad, precio, precio_costo, fecha_vencimiento, lote, categoria)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             d.get("invima_id"), d.get("catalogo_id"),
             d["nombre"], d.get("principio",""), d.get("laboratorio",""),
             d.get("registro",""), d["cantidad"], d["precio"],
+            d.get("precio_costo"),
             d.get("fecha_vencimiento",""), d.get("lote",""), categoria
         ))
         conn.commit()
@@ -432,9 +454,9 @@ def inventario_actualizar(item_id):
     conn = get_db()
     query(conn, """
         UPDATE inventario SET 
-            precio = %s, cantidad = %s, fecha_vencimiento = %s, lote = %s, categoria = %s
+            precio = %s, precio_costo = %s, cantidad = %s, fecha_vencimiento = %s, lote = %s, categoria = %s
         WHERE id = %s
-    """, (d.get("precio"), d.get("cantidad"), d.get("fecha_vencimiento"), d.get("lote"), d.get("categoria", ""), item_id))
+    """, (d.get("precio"), d.get("precio_costo"), d.get("cantidad"), d.get("fecha_vencimiento"), d.get("lote"), d.get("categoria", ""), item_id))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -591,7 +613,7 @@ def reporte_inventario():
     
     conn = get_db()
     rows = query(conn, """
-        SELECT nombre, laboratorio, cantidad, precio, fecha_vencimiento, categoria
+        SELECT nombre, laboratorio, cantidad, precio, precio_costo, fecha_vencimiento, categoria
         FROM inventario WHERE cantidad > 0 ORDER BY cantidad ASC
     """).fetchall()
     conn.close()
@@ -600,10 +622,12 @@ def reporte_inventario():
     df = pd.DataFrame(data)
     
     if not df.empty:
+        df["precio_costo"] = df["precio_costo"].fillna(0)
         df["valor_total"] = df["cantidad"] * df["precio"]
+        df["utilidad_estimada"] = df["cantidad"] * (df["precio"] - df["precio_costo"])
         df["alerta_stock"] = df["cantidad"].apply(lambda x: "CRÍTICO" if x <= 5 else ("BAJO" if x <= 10 else "OK"))
-        df = df[["nombre", "laboratorio", "cantidad", "precio", "fecha_vencimiento", "categoria", "valor_total", "alerta_stock"]]
-        df.columns = ["Nombre", "Laboratorio", "Cantidad", "Precio", "Fecha Vencimiento", "Categoría", "Valor Total", "Alerta Stock"]
+        df = df[["nombre", "laboratorio", "cantidad", "precio", "precio_costo", "fecha_vencimiento", "categoria", "valor_total", "utilidad_estimada", "alerta_stock"]]
+        df.columns = ["Nombre", "Laboratorio", "Cantidad", "Precio Venta", "Precio Costo", "Fecha Vencimiento", "Categoría", "Valor Total", "Utilidad Estimada", "Alerta Stock"]
     
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -980,6 +1004,10 @@ def registrar_venta():
         return jsonify({"ok": False, "error": "Stock insuficiente"}), 400
 
     total = item["precio"] * d["cantidad"]
+    metodo_pago = d.get("metodo_pago", "efectivo")
+    es_credito = d.get("es_credito", False)
+    cliente_nombre = d.get("cliente_nombre", "")
+    cliente_tel = d.get("cliente_tel", "")
 
     query(conn, """
         UPDATE inventario SET cantidad = cantidad - %s WHERE id = %s
@@ -988,13 +1016,54 @@ def registrar_venta():
     import datetime
     fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
     query(conn, """
-        INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total, fecha_actual))
+        INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha, metodo_pago, es_credito, cliente_nombre)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total, fecha_actual, metodo_pago, es_credito, cliente_nombre if es_credito else None))
+
+    if es_credito:
+        query(conn, """
+            INSERT INTO creditos (cliente_nombre, cliente_tel, inventario_id, nombre_producto, cantidad, total, saldo, fecha)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (cliente_nombre, cliente_tel, item["id"], item["nombre"], d["cantidad"], total, total, fecha_actual))
 
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "total": total})
+
+# ── CRÉDITOS ──────────────────────────────────────────────
+@app.route("/api/creditos", methods=["GET"])
+def creditos_listar():
+    conn = get_db()
+    rows = query(conn, """
+        SELECT * FROM creditos WHERE saldo > 0 ORDER BY fecha DESC
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/creditos/<int:credito_id>/abonar", methods=["POST"])
+def credito_abonar(credito_id):
+    d = request.json
+    monto = d.get("monto", 0)
+    if monto <= 0:
+        return jsonify({"ok": False, "error": "Monto inválido"}), 400
+
+    conn = get_db()
+    credito = query(conn, "SELECT * FROM creditos WHERE id = %s", (credito_id,)).fetchone()
+    if not credito:
+        conn.close()
+        return jsonify({"ok": False, "error": "Crédito no encontrado"}), 404
+
+    nuevo_saldo = credito["saldo"] - monto
+    nuevo_abonado = credito["abonado"] + monto
+    estado = "pagado" if nuevo_saldo <= 0 else "pendiente"
+
+    query(conn, """
+        UPDATE creditos SET abonado = %s, saldo = %s, estado = %s WHERE id = %s
+    """, (nuevo_abonado, max(nuevo_saldo, 0), estado, credito_id))
+
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "saldo": max(nuevo_saldo, 0), "estado": estado})
 
 # ── ANALÍTICAS (PREMIUM) ───────────────────────────────────
 def _premium_required():

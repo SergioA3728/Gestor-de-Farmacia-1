@@ -446,6 +446,7 @@ async function editarInventario(id) {
     $("inv-laboratorio").value = producto.laboratorio || "";
     $("inv-cantidad").value = producto.cantidad || 1;
     $("inv-precio").value = producto.precio || 0;
+    $("inv-precio-costo").value = producto.precio_costo || "";
     $("inv-fecha-vencimiento").value = producto.fecha_vencimiento || "";
     $("inv-lote").value = producto.lote || "";
     $("inv-categoria").value = producto.categoria || "";
@@ -505,6 +506,7 @@ function limpiarFormulario() {
     $("inv-laboratorio").value = "";
     $("inv-cantidad").value = 1;
     $("inv-precio").value = 0;
+    $("inv-precio-costo").value = "";
     $("inv-fecha-vencimiento").value = "";
     $("inv-lote").value = "";
     $("inv-categoria").value = "";
@@ -562,6 +564,7 @@ $("inv-guardar")?.addEventListener("click", async () => {
         laboratorio: $("inv-laboratorio").value.trim(),
         cantidad: cantidadReal,
         precio,
+        precio_costo: parseFloat($("inv-precio-costo").value) || null,
         fecha_vencimiento: $("inv-fecha-vencimiento").value,
         lote: $("inv-lote").value.trim(),
         categoria: $("inv-categoria").value
@@ -644,14 +647,28 @@ function seleccionarVenta(id) {
     $("venta-buscar").value = "";
 }
 
+$("venta-es-credito")?.addEventListener("change", (e) => {
+    $("credito-campos").style.display = e.target.checked ? "block" : "none";
+});
+
 $("venta-guardar")?.addEventListener("click", async () => {
     if (!ventaSel) return;
     const cantidad = parseInt($("venta-cantidad").value);
+    const esCredito = $("venta-es-credito").checked;
+    
+    const body = {
+        inventario_id: ventaSel.id,
+        cantidad,
+        metodo_pago: $("venta-metodo-pago").value,
+        es_credito: esCredito,
+        cliente_nombre: esCredito ? $("venta-cliente-nombre").value.trim() : "",
+        cliente_tel: esCredito ? $("venta-cliente-tel").value.trim() : ""
+    };
     
     const res = await fetch("/api/ventas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inventario_id: ventaSel.id, cantidad })
+        body: JSON.stringify(body)
     });
     const data = await res.json();
     
@@ -662,6 +679,10 @@ $("venta-guardar")?.addEventListener("click", async () => {
             $("venta-detalle").style.display = "none";
             $("venta-detalle").setAttribute("aria-hidden", "true");
             $("venta-buscar").value = "";
+            $("venta-es-credito").checked = false;
+            $("credito-campos").style.display = "none";
+            $("venta-cliente-nombre").value = "";
+            $("venta-cliente-tel").value = "";
             cargarInventarioVentas();
             cargarVentas();
             cargarInventario();
@@ -699,10 +720,66 @@ async function cargarVentas() {
             <div class="venta-item-info">
                 <h4>${escapeHtml(d.nombre)}</h4>
                 <p>${escapeHtml(d.laboratorio || "")} · ${d.cantidad} unidad(es)</p>
+                <span class="badge">${escapeHtml(d.metodo_pago || "efectivo")}</span>
+                ${d.es_credito ? `<span class="badge" style="background:var(--accent);color:#fff;">Crédito</span>` : ""}
             </div>
             <div class="venta-item-total">${formatCOP(d.total)}</div>
         </div>
     `).join("");
+}
+
+// ── CRÉDITOS ──────────────────────────────────────────────
+$("btn-creditos-abiertos")?.addEventListener("click", async () => {
+    $("modal-creditos").style.display = "flex";
+    await cargarCreditos();
+});
+
+async function cargarCreditos() {
+    const cont = $("creditos-lista");
+    const res = await fetch("/api/creditos");
+    const datos = await res.json();
+
+    if (!datos || datos.length === 0) {
+        cont.innerHTML = `<div class="empty-state"><p>No hay créditos abiertos</p></div>`;
+        return;
+    }
+
+    cont.innerHTML = datos.map(d => `
+        <div class="venta-item" style="flex-direction:column;gap:8px;">
+            <div style="display:flex;justify-content:space-between;width:100%;">
+                <div class="venta-item-info">
+                    <h4>${escapeHtml(d.nombre_producto)}</h4>
+                    <p>Cliente: ${escapeHtml(d.cliente_nombre)} · Tel: ${escapeHtml(d.cliente_tel || "-")}</p>
+                    <p>Total: ${formatCOP(d.total)} · Saldo: <strong>${formatCOP(d.saldo)}</strong></p>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="number" id="abono-${d.id}" min="1" max="${d.saldo}" placeholder="Monto" style="width:120px;padding:6px;border:1px solid var(--border);border-radius:6px;">
+                <button class="btn btn-primary" style="font-size:12px;padding:6px 12px;" onclick="abonarCredito(${d.id})">Abonar</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+async function abonarCredito(id) {
+    const input = $(`abono-${id}`);
+    const monto = parseFloat(input.value);
+    if (!monto || monto <= 0) { alert("Ingresa un monto válido"); return; }
+
+    const res = await fetch(`/api/creditos/${id}/abonar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monto })
+    });
+    const data = await res.json();
+    if (data.ok) {
+        if (data.estado === "pagado") {
+            alert("Crédito pagado completamente");
+        }
+        await cargarCreditos();
+    } else {
+        alert(data.error || "Error al abonar");
+    }
 }
 
 // Cerrar sugerencias al hacer click fuera
