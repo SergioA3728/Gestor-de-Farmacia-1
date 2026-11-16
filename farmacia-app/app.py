@@ -134,6 +134,10 @@ def init_db():
     _ensure_column(conn, "ventas", "metodo_pago", "TEXT DEFAULT 'efectivo'")
     _ensure_column(conn, "ventas", "es_credito", "BOOLEAN DEFAULT FALSE")
     _ensure_column(conn, "ventas", "cliente_nombre", "TEXT")
+    # Costo de compra copiado en el momento de la venta (igual que precio_unitario),
+    # para que la utilidad histórica no cambie si luego cambia el costo en inventario.
+    # Ventas anteriores a esta columna quedan en NULL = "sin costo registrado".
+    _ensure_column(conn, "ventas", "costo_unitario", "DOUBLE PRECISION")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS creditos (
@@ -984,51 +988,79 @@ def ventas_listar():
 
 @app.route("/api/ventas", methods=["POST"])
 def registrar_venta():
-    d = request.json
-    conn = get_db()
+    # silent=True: si el body no es JSON válido devuelve None en vez de lanzar error.
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict):  # una lista u otro JSON no sirve: tratarlo como vacío
+        d = {}
+
+    # ── Validaciones (antes de abrir la conexión: no gastan conexiones) ──
     inv_id = d.get("inventario_id")
-    if not inv_id:
-        conn.close()
+    if not isinstance(inv_id, int) or isinstance(inv_id, bool) or inv_id <= 0:
         return jsonify({"ok": False, "error": "inventario_id requerido"}), 400
 
-    item = query(conn, """
-        SELECT id, nombre, laboratorio, cantidad, precio FROM inventario WHERE id = %s
-    """, (inv_id,)).fetchone()
+    # En Python True es un int (True == 1), por eso se excluye bool explícitamente.
+    cantidad = d.get("cantidad")
+    if not isinstance(cantidad, int) or isinstance(cantidad, bool) or cantidad <= 0:
+        return jsonify({"ok": False, "error": "La cantidad debe ser un número entero mayor que 0"}), 400
 
-    if not item:
-        conn.close()
-        return jsonify({"ok": False, "error": "Producto no encontrado"}), 404
-
-    if item["cantidad"] < d["cantidad"]:
-        conn.close()
-        return jsonify({"ok": False, "error": "Stock insuficiente"}), 400
-
-    total = item["precio"] * d["cantidad"]
-    metodo_pago = d.get("metodo_pago", "efectivo")
+    # Solo un booleano real: el texto "false" sería verdadero en Python.
     es_credito = d.get("es_credito", False)
-    cliente_nombre = d.get("cliente_nombre", "")
-    cliente_tel = d.get("cliente_tel", "")
+    if not isinstance(es_credito, bool):
+        return jsonify({"ok": False, "error": "es_credito debe ser true o false"}), 400
 
-    query(conn, """
-        UPDATE inventario SET cantidad = cantidad - %s WHERE id = %s
-    """, (d["cantidad"], item["id"]))
+    # Los campos de texto deben ser texto; si llega una lista u objeto, el INSERT fallaría.
+    metodo_pago = d.get("metodo_pago") or "efectivo"
+    cliente_nombre = d.get("cliente_nombre") or ""
+    cliente_tel = d.get("cliente_tel") or ""
+    if not all(isinstance(v, str) for v in (metodo_pago, cliente_nombre, cliente_tel)):
+        return jsonify({"ok": False, "error": "metodo_pago y datos del cliente deben ser texto"}), 400
+    cliente_nombre, cliente_tel = cliente_nombre.strip(), cliente_tel.strip()
 
-    import datetime
-    fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
-    query(conn, """
-        INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, total, fecha, metodo_pago, es_credito, cliente_nombre)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (item["id"], item["nombre"], item["laboratorio"], d["cantidad"], item["precio"], total, fecha_actual, metodo_pago, es_credito, cliente_nombre if es_credito else None))
+    # Un crédito sin nombre no se puede cobrar después.
+    if es_credito and not cliente_nombre:
+        return jsonify({"ok": False, "error": "Para vender a crédito escribe el nombre del cliente"}), 400
 
-    if es_credito:
+    conn = get_db()
+    try:
+        # Revisar el stock y restarlo en UNA sola orden (operación atómica).
+        # PostgreSQL bloquea la fila mientras la actualiza: si dos cajeros venden
+        # la última unidad a la vez, al segundo ya no se le cumple "cantidad >= %s"
+        # y no se actualiza nada. RETURNING devuelve los datos de la fila modificada.
+        item = query(conn, """
+            UPDATE inventario
+            SET cantidad = cantidad - %s
+            WHERE id = %s AND cantidad >= %s
+            RETURNING id, nombre, laboratorio, precio, precio_costo
+        """, (cantidad, inv_id, cantidad)).fetchone()
+
+        if not item:
+            # No se actualizó nada: o el producto no existe, o no hay stock.
+            existe = query(conn, "SELECT 1 FROM inventario WHERE id = %s", (inv_id,)).fetchone()
+            if not existe:
+                return jsonify({"ok": False, "error": "Producto no encontrado"}), 404
+            return jsonify({"ok": False, "error": "Stock insuficiente"}), 400
+
+        total = item["precio"] * cantidad
+
+        import datetime
+        fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
         query(conn, """
-            INSERT INTO creditos (cliente_nombre, cliente_tel, inventario_id, nombre_producto, cantidad, total, saldo, fecha)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (cliente_nombre, cliente_tel, item["id"], item["nombre"], d["cantidad"], total, total, fecha_actual))
+            INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, costo_unitario, total, fecha, metodo_pago, es_credito, cliente_nombre)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (item["id"], item["nombre"], item["laboratorio"], cantidad, item["precio"], item["precio_costo"], total, fecha_actual, metodo_pago, es_credito, cliente_nombre if es_credito else None))
 
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True, "total": total})
+        if es_credito:
+            query(conn, """
+                INSERT INTO creditos (cliente_nombre, cliente_tel, inventario_id, nombre_producto, cantidad, total, saldo, fecha)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (cliente_nombre, cliente_tel, item["id"], item["nombre"], cantidad, total, total, fecha_actual))
+
+        conn.commit()
+        return jsonify({"ok": True, "total": total})
+    finally:
+        # Se ejecuta siempre, aunque haya return o excepción. Si no hubo commit,
+        # cerrar la conexión descarta los cambios a medias (la resta de stock incluida).
+        conn.close()
 
 # ── CRÉDITOS ──────────────────────────────────────────────
 @app.route("/api/creditos", methods=["GET"])
