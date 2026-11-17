@@ -1,5 +1,54 @@
 const $ = id => document.getElementById(id);
 
+// ── SESIÓN Y ROL ─────────────────────────────────────────
+// El servidor escribe el rol en <body data-rol="..."> al armar la página.
+// Solo sirve para decidir qué mostrar; los permisos los aplica el servidor.
+const ROL = document.body.dataset.rol;
+const ES_ADMIN = ROL === "admin";
+
+// Envoltorio de fetch: un solo lugar para manejar sesión vencida, permisos y caídas,
+// sin tocar las ~22 llamadas fetch del archivo.
+const _fetchOriginal = window.fetch.bind(window);
+window.fetch = async (...args) => {
+    let res;
+    try {
+        res = await _fetchOriginal(...args);
+    } catch (err) {
+        avisoGlobal("Sin conexión con el servidor, intenta de nuevo.");
+        throw err;
+    }
+    if (res.status === 401) {
+        window.location.href = "/login";  // sesión vencida o usuario desactivado
+    } else if (res.status === 403) {
+        // Las analíticas sin premium también responden 403 (con premium_required):
+        // eso ya lo explica el modal premium, así que no se muestra este aviso.
+        res.clone().json()
+            .then(d => { if (!d.premium_required) avisoGlobal("No tienes permiso para esta acción."); })
+            .catch(() => avisoGlobal("No tienes permiso para esta acción."));
+    } else if (res.status === 503) {
+        avisoGlobal("Sin conexión con la base de datos, intenta de nuevo.");
+    }
+    return res;
+};
+
+let _avisoTimer = null;
+function avisoGlobal(texto) {
+    let el = $("aviso-global");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "aviso-global";
+        el.setAttribute("role", "alert");
+        el.style.cssText = "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);" +
+            "background:var(--danger);color:#fff;padding:10px 16px;border-radius:10px;" +
+            "font-size:14px;z-index:9999;max-width:calc(100% - 32px);";
+        document.body.appendChild(el);
+    }
+    el.textContent = texto;
+    el.style.display = "block";
+    clearTimeout(_avisoTimer);
+    _avisoTimer = setTimeout(() => { el.style.display = "none"; }, 4000);
+}
+
 function formatCOP(valor) {
     return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(valor);
 }
@@ -144,6 +193,7 @@ function navigate(page) {
     if (page === "inventario") cargarInventario();
     if (page === "ventas") { cargarInventarioVentas(); cargarVentas(); }
     if (page === "analiticas") cargarAnaliticas();
+    if (page === "usuarios") cargarUsuarios();
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
@@ -187,7 +237,8 @@ $("dark-toggle")?.addEventListener("keydown", e => {
 
 // ── DASHBOARD ─────────────────────────────────────────────
 async function cargarDashboard() {
-    await fetch("/api/inventario/recategorizar", { method: "POST" });
+    // recategorizar es solo de admin: si lo pidiera un cajero recibiría 403 en cada carga.
+    if (ES_ADMIN) await fetch("/api/inventario/recategorizar", { method: "POST" });
     
     const res = await fetch("/api/dashboard");
     const data = await res.json();
@@ -411,10 +462,10 @@ function renderInventario(datos) {
             <td>${formatDate(d.fecha_vencimiento)}</td>
             <td>${escapeHtml(d.lote || "-")}</td>
             <td>
-                <button class="btn btn-icon" onclick="editarInventario(${d.id})" aria-label="Editar ${escapeJs(d.nombre)}" title="Editar">
+                <button class="btn btn-icon solo-admin" onclick="editarInventario(${d.id})" aria-label="Editar ${escapeJs(d.nombre)}" title="Editar">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
-                <button class="btn btn-icon" onclick="eliminarInventario(${d.id})" aria-label="Eliminar ${escapeJs(d.nombre)}" title="Eliminar">
+                <button class="btn btn-icon solo-admin" onclick="eliminarInventario(${d.id})" aria-label="Eliminar ${escapeJs(d.nombre)}" title="Eliminar">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                 </button>
             </td>
@@ -639,6 +690,8 @@ function seleccionarVenta(id) {
     $("venta-laboratorio").value = ventaSel.laboratorio || "-";
     $("venta-stock").value = ventaSel.cantidad;
     $("venta-precio").value = formatCOP(ventaSel.precio);
+    // Referencia para negociar con clientes conocidos (decisión de Sergio, ver plan de login).
+    $("venta-costo").value = ventaSel.precio_costo ? formatCOP(ventaSel.precio_costo) : "Sin costo registrado";
     $("venta-cantidad").value = 1;
     $("venta-cantidad").max = ventaSel.cantidad;
     $("venta-detalle").style.display = "grid";
@@ -1130,3 +1183,70 @@ $("premium-activar")?.addEventListener("click", () => {
 });
 $("btn-activar-premium")?.addEventListener("click", mostrarModalPremium);
 
+
+// ── USUARIOS (solo admin) ────────────────────────────────
+async function cargarUsuarios() {
+    if (!ES_ADMIN) return;
+    const res = await fetch("/api/usuarios");
+    if (!res.ok) return;
+    const usuarios = await res.json();
+    $("usuarios-tabla-body").innerHTML = usuarios.map(u => `
+        <tr>
+            <td>${escapeHtml(u.usuario)}</td>
+            <td>${escapeHtml(u.nombre)}</td>
+            <td>${u.rol === "admin" ? "Administrador" : "Cajero"}</td>
+            <td>${u.activo ? "Activo" : "Desactivado"}</td>
+            <td>
+                <button class="btn btn-secondary" onclick="cambiarEstadoUsuario(${u.id}, ${!u.activo})">
+                    ${u.activo ? "Desactivar" : "Activar"}
+                </button>
+                <button class="btn btn-secondary" onclick="reiniciarPasswordUsuario(${u.id})">Nueva contraseña</button>
+            </td>
+        </tr>
+    `).join("");
+}
+
+async function actualizarUsuario(id, cambios) {
+    const res = await fetch(`/api/usuarios/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cambios)
+    });
+    const data = await res.json().catch(() => ({}));
+    msg("usuarios-msg", data.ok ? "Cambios guardados." : (data.error || "No se pudo guardar."), data.ok ? "ok" : "error");
+    if (data.ok) cargarUsuarios();
+}
+
+function cambiarEstadoUsuario(id, activo) {
+    if (!activo && !confirm("¿Desactivar este usuario? No podrá entrar hasta que lo actives de nuevo.")) return;
+    actualizarUsuario(id, { activo });
+}
+
+function reiniciarPasswordUsuario(id) {
+    const password = prompt("Nueva contraseña (mínimo 8 caracteres):");
+    if (password === null) return;
+    actualizarUsuario(id, { password });
+}
+
+$("usuarios-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+        usuario: $("usr-usuario").value.trim(),
+        nombre: $("usr-nombre").value.trim(),
+        password: $("usr-password").value,
+        rol: $("usr-rol").value
+    };
+    const res = await fetch("/api/usuarios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) {
+        msg("usuarios-msg", `Usuario "${body.usuario}" creado.`, "ok");
+        e.target.reset();
+        cargarUsuarios();
+    } else {
+        msg("usuarios-msg", data.error || "No se pudo crear el usuario.", "error");
+    }
+});

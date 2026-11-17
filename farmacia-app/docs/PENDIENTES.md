@@ -29,3 +29,11 @@ Problemas menores detectados en el mapeo del 2026-11-16. Los 5 principales está
 - [ ] `canonical` de ejemplo (`tu-dominio.com`). `templates/index.html:8`. *Comprobado.*
 - [ ] `.gitignore`: `#farmacia.db` es un comentario y no excluye nada; faltan `.env.*` y `*.log`. *Comprobado.*
 - [ ] `CONTEXT.md` desactualizado: dice "local-only" y la app está publicada. *Comprobado.*
+
+## Login y roles (de docs/planes/2026-11-16-login-roles.md)
+- [ ] **PRIORIDAD ALTA — Límite de intentos de login.** Sin él se pueden probar contraseñas sin parar contra `/login`. La app ya es pública en Render; hacerlo antes de cualquier uso con datos reales.
+- [ ] Recuperar contraseña y que cada usuario cambie la suya (hoy solo el admin la reinicia).
+- [ ] Reiniciar la contraseña o desactivar a alguien no cierra una sesión ya abierta en otro worker hasta 60 s después (caché) — y reiniciar la contraseña no invalida la cookie vigente hasta 12 h. Solución: guardar una "versión de sesión" en `usuarios` y compararla.
+- [ ] Auditoría de abonos y de cambios de inventario por usuario (hoy solo la venta guarda `vendedor`).
+- [ ] Tokens CSRF (hoy protege `SameSite=Lax`).
+- [ ] **Precio negociado en la venta:** el cajero ve el costo como referencia, pero `registrar_venta()` siempre cobra `inventario.precio`. Siguiente cambio a planear.

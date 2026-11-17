@@ -11,6 +11,14 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        /* El servidor pone data-rol en <body> al armar la página: así el cajero
+           nunca ve, ni por un instante, lo que es solo del admin. Esto es comodidad:
+           la seguridad real es @solo_admin en app.py. */
+        body[data-rol="cajero"] .solo-admin { display: none !important; }
+        .usuario-sesion { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 4px 0; font-size: 13px; color: var(--text-secondary); }
+        .usuario-sesion strong { color: var(--text); display: block; }
+        .usuario-sesion form { margin: 0; }
+        .usuarios-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; margin-bottom: 20px; }
         .filter-buttons { display: flex; gap: 8px; }
         .filter-btn { padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all var(--transition); }
         .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -47,7 +55,7 @@
     }
     </script>
 </head>
-<body>
+<body data-rol="{{ usuario.rol }}">
 <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
 
 <aside class="sidebar" role="navigation" aria-label="Navegación principal">
@@ -75,7 +83,7 @@
             </button>
         </div>
         
-        <div class="nav-section">
+        <div class="nav-section solo-admin">
             <div class="nav-section-title">Reportes</div>
             <button class="nav-item" data-page="reportes" aria-selected="false" role="tab">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v4a2 2 0 002 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
@@ -83,7 +91,15 @@
             </button>
         </div>
         
-        <div class="nav-section">
+        <div class="nav-section solo-admin">
+            <div class="nav-section-title">Administración</div>
+            <button class="nav-item" data-page="usuarios" aria-selected="false" role="tab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Usuarios
+            </button>
+        </div>
+
+        <div class="nav-section solo-admin">
             <div class="nav-section-title">Premium</div>
             <button class="nav-item" data-page="analiticas" aria-selected="false" role="tab">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -99,6 +115,15 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
                 <span>Modo oscuro</span>
             </div>
+        </div>
+        <div class="usuario-sesion">
+            <div>
+                <strong>{{ usuario.nombre }}</strong>
+                {{ 'Administrador' if usuario.rol == 'admin' else 'Cajero' }}
+            </div>
+            <form method="post" action="/logout">
+                <button class="btn btn-secondary" type="submit">Salir</button>
+            </form>
         </div>
     </div>
 </aside>
@@ -119,11 +144,11 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                     <span>Nueva venta</span>
                 </button>
-                <button class="quick-action-btn" onclick="navigate('inventario'); document.getElementById('btn-agregar-producto').click()">
+                <button class="quick-action-btn solo-admin" onclick="navigate('inventario'); document.getElementById('btn-agregar-producto').click()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                     <span>Agregar producto</span>
                 </button>
-                <button class="quick-action-btn" onclick="navigate('reportes')">
+                <button class="quick-action-btn solo-admin" onclick="navigate('reportes')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     <span>Exportar reporte</span>
                 </button>
@@ -228,11 +253,11 @@
                     <button class="filter-btn" data-filter="bajo-stock">Bajo stock</button>
                     <button class="filter-btn" data-filter="prox-vencer">Próx. a vencer</button>
                 </div>
-                <button class="btn btn-primary" id="btn-agregar-producto">
+                <button class="btn btn-primary solo-admin" id="btn-agregar-producto">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 5v14M5 12h14"/></svg>
                     Agregar producto
                 </button>
-                <button class="btn btn-secondary" id="btn-importar-excel" title="Importar desde Excel">
+                <button class="btn btn-secondary solo-admin" id="btn-importar-excel" title="Importar desde Excel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                     Importar
                 </button>
@@ -293,6 +318,10 @@
                             <div class="form-group">
                                 <label for="venta-precio">Precio unitario</label>
                                 <input type="text" id="venta-precio" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="venta-costo">Costo (referencia)</label>
+                                <input type="text" id="venta-costo" readonly>
                             </div>
                         </div>
                         <div class="form-group">
@@ -421,6 +450,45 @@
         </section>
         
         <!-- Reportes -->
+        <!-- Usuarios (solo admin; el servidor igual rechaza a un cajero con 403) -->
+        <section id="page-usuarios" class="page solo-admin" role="tabpanel" aria-labelledby="usuarios-title">
+            <div class="page-header">
+                <h1 class="page-title" id="usuarios-title">Usuarios</h1>
+                <p class="page-subtitle">Crea cuentas para tus cajeros, desactívalas o reinicia su contraseña</p>
+            </div>
+            <form class="usuarios-form" id="usuarios-form">
+                <div class="form-group">
+                    <label for="usr-usuario">Usuario</label>
+                    <input type="text" id="usr-usuario" autocomplete="off" required maxlength="50">
+                </div>
+                <div class="form-group">
+                    <label for="usr-nombre">Nombre</label>
+                    <input type="text" id="usr-nombre" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="usr-password">Contraseña (mín. 8)</label>
+                    <input type="password" id="usr-password" autocomplete="new-password" required minlength="8">
+                </div>
+                <div class="form-group">
+                    <label for="usr-rol">Rol</label>
+                    <select id="usr-rol">
+                        <option value="cajero">Cajero</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" type="submit">Crear usuario</button>
+            </form>
+            <p id="usuarios-msg"></p>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody id="usuarios-tabla-body"></tbody>
+                </table>
+            </div>
+        </section>
+
         <section id="page-reportes" class="page" role="tabpanel" aria-labelledby="reportes-title">
             <div class="topbar">
                 <div class="topbar-left">

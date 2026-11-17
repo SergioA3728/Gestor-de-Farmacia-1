@@ -107,3 +107,51 @@ Los cinco problemas de arriba son los más graves. Estos otros afectan **número
 1. Dos cajeros venden 3 unidades cada uno de un producto con 4 en stock, exactamente a la vez. ¿Qué responde cada petición y cuánto stock queda? ¿Qué hace PostgreSQL con el segundo `UPDATE` mientras espera?
 2. El reporte de utilidad va a usar `costo_unitario`. Para las ventas viejas con NULL, ¿las tratarías como costo 0, las excluirías del reporte o usarías el `precio_costo` actual? ¿Qué le pasa al número que ve el dueño en cada opción?
 3. Un compañero propone quitar el `UPDATE` condicional y dejar el `SELECT` de antes, pero con un `time.sleep` o un candado de Python (`threading.Lock`). ¿Qué le respondes? Piensa en cuántos workers de gunicorn corren en Render.
+
+---
+
+## 2026-11-16 · Login con usuarios y roles (admin y cajero)
+
+**Qué se hizo:** la app ahora exige iniciar sesión. Hay dos roles: `admin` (todo) y `cajero` (vender, ver inventario, clientes y fiados). Las rutas de administración responden 403 al cajero. Plan completo, revisión del pez dorado, decisiones de Sergio y "Cambios respecto al plan": [docs/planes/2026-11-16-login-roles.md](planes/2026-11-16-login-roles.md).
+**Por qué:** hasta ahora cualquiera con la URL veía costos, utilidades y deudas de clientes. Era el pendiente "Autenticación" de la entrada anterior.
+
+**Decisiones:**
+- **Negar por defecto.** Un solo `@app.before_request` (`exigir_login`, `app.py:~283`) protege todas las rutas, salvo las de `RUTAS_PUBLICAS` (`login` y `static`). Alternativa: decorar ruta por ruta con `@login_requerido`. Con decoradores, olvidar uno deja la ruta abierta sin que nada avise. Con la lista pública, olvidar algo lo deja cerrado, y el error se nota enseguida. Lo que se paga: hay que acordarse de agregar a la lista las rutas que de verdad deben ser públicas. Para lo que es solo de admin sí se usa `@solo_admin`, porque ahí hay que decidir ruta por ruta.
+- **Contraseñas con hash y hash de relleno.** Se guarda `generate_password_hash(...)`, nunca la contraseña. Si el usuario no existe, el login igual compara contra `_HASH_RELLENO`. Así tarda lo mismo con usuario válido y con inválido, y nadie puede descubrir qué usuarios existen midiendo el tiempo de respuesta.
+- **Cookie firmada.** La sesión de Flask va en una cookie firmada con `SECRET_KEY` (`app.py:~19`). Firmada no significa cifrada: el navegador puede leerla, pero no modificarla sin la clave. Por eso la app no arranca sin `SECRET_KEY`, en vez de usar una clave por defecto que todos conocerían.
+- **Caché de 60 s por worker** (`_cache_usuarios`, `CACHE_USUARIO_SEG`). Evita una consulta a la BD en cada petición. Alternativas: consultar siempre (más simple y exacto, pero más lento y más carga), o guardar el rol en la cookie (sin consulta, pero un usuario desactivado seguiría entrando hasta que expire la cookie). Lo que se paga: desactivar a alguien puede tardar hasta 60 s en aplicarse en los otros workers. El worker donde se hace el cambio sí actualiza al instante, con `_cache_usuarios.pop`.
+- **Prueba que recorre `url_map`** (`tests/test_permisos.py`). No prueba rutas a mano: recorre todas las que Flask conoce y comprueba que cada una exige sesión o está en la lista pública, y que las de admin devuelven 403 al cajero. Una ruta nueva queda cubierta sin tocar la prueba. Se comprobó con una **mutación**: se quitó un `@solo_admin` a propósito y la prueba falló. Una prueba que nunca ha fallado no demuestra que detecte algo.
+- **401, 403 y 503.** 401 es "no sé quién eres" (sin sesión). 403 es "sé quién eres y no puedes". 503 es "la BD no responde", que no es culpa de las credenciales. Si se confundieran, un fallo de la BD sacaría a todos al login como si hubieran escrito mal la clave. Las descargas de `/api/reportes/` son navegación normal, no `fetch`, así que sin sesión se redirigen al login en vez de recibir JSON.
+- **Decisión de negocio de Sergio:** el cajero ve el costo. En las tiendas de barrio el precio se negocia con los clientes conocidos y el cajero necesita saber el margen. Esa decisión generó un pendiente nuevo, "precio negociado en la venta" (ver `docs/PENDIENTES.md`).
+
+**Cómo funciona:**
+1. Una petición entra y `exigir_login` revisa el endpoint. Si es público, pasa.
+2. Si no, `usuario_actual()` lee `session["uid"]`, mira la caché o consulta `usuarios`, y exige que `activo` sea verdadero.
+3. Sin usuario: 401 en `/api/*` o redirección a `login`. Con la BD caída: 503.
+4. Con usuario, queda en `g.usuario` y la ruta corre. Si lleva `@solo_admin` y el rol no es admin, 403.
+5. `login` (`app.py:~330`) verifica el hash, guarda `uid` en la sesión y vacía la caché de ese usuario.
+6. `init_db()` crea la tabla `usuarios` y el admin inicial desde variables de entorno (`.env.example`). El front (`static/app.js`, `templates/index.html`, `templates/login.html`) oculta lo de admin, pero la seguridad real está en el servidor.
+
+**Revisor:** aprobado con cambios menores, ya corregidos:
+- El aviso de 403 salía a la vez que el modal premium.
+- Carrera de `init_db` entre workers, resuelta con `pg_advisory_xact_lock`.
+- El byte NUL en el usuario daba 500.
+- El log del admin inicial.
+
+**Aceptado sin cambio:**
+- Un cajero que entra a mano a la URL de un reporte ve un JSON 403.
+- Dos admins que se desactivan entre sí al mismo tiempo.
+- Un cambio de contraseña no cierra las sesiones abiertas (está en PENDIENTES).
+
+**Conceptos nuevos:** `before_request` (función de Flask que corre antes de cada ruta), hash (huella de un solo sentido de la contraseña), sesión (datos del usuario que el servidor recuerda entre peticiones), cookie firmada (cookie con una firma que detecta alteraciones), worker (proceso de gunicorn; cada uno tiene su propia memoria), `g` (espacio de Flask que dura una sola petición), mutación (romper el código a propósito para ver si la prueba lo detecta), advisory lock (candado de PostgreSQL elegido por la aplicación, aquí para que un solo worker cree las tablas).
+
+**Cómo comprobarlo:**
+- Hecho: `python tests/test_permisos.py` da TODO OK con una BD falsa.
+- **No probado:** con PostgreSQL real ni en navegador. Falta entrar como admin y como cajero, desactivar un usuario y ver cuánto tarda en perder el acceso, y arrancar con dos workers.
+
+**Lección que se lleva a otros proyectos:** la seguridad debe fallar cerrada. Se define una regla global que niega todo y se abren excepciones explícitas. Se añade una prueba que recorre todas las rutas, para que el siguiente que agregue una no dependa de acordarse.
+
+**Preguntas para Sergio:**
+1. ¿Por qué negar por defecto es más seguro que decorar cada ruta? Responde con un caso concreto: un compañero agrega mañana `/api/exportar_clientes`.
+2. Se despliega en Render sin definir `SECRET_KEY`. ¿Qué pasa al arrancar? ¿Y qué pasaría si la app, en vez de fallar, generara una clave aleatoria en cada arranque con varios workers?
+3. El dueño desactiva a un cajero que está en medio de una venta. ¿Qué ve el cajero y cuándo? ¿Qué cambiarías si el negocio exigiera corte inmediato?

@@ -1,5 +1,9 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, g
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+import datetime
 import os
+import time
 import psycopg2
 import psycopg2.extras
 import unicodedata
@@ -8,6 +12,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+
+# ── SESIÓN ───────────────────────────────────────────────
+# La sesión vive en una cookie firmada con SECRET_KEY. Sin la clave, cualquiera
+# podría fabricar una cookie de admin, así que la app se niega a arrancar.
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    raise RuntimeError(
+        "Falta SECRET_KEY. Genera una con: "
+        "python -c \"import secrets; print(secrets.token_hex(32))\" "
+        "y defínela en .env (local) o en el panel de Render."
+    )
+app.secret_key = _secret_key
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,     # JavaScript no puede leer la cookie
+    SESSION_COOKIE_SAMESITE="Lax",    # otros sitios no pueden mandar POST con ella
+    # Solo por HTTPS (Render). En local no hay HTTPS: COOKIE_SEGURA=0 en .env
+    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SEGURA", "1") != "0",
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=12),  # un turno
+)
 STOCK_MINIMO = 10
 STOCK_CRITICO = 5
 DIAS_ALERTA_VENCIMIENTO = 30
@@ -77,6 +100,10 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
+    # Candado de PostgreSQL para que, si varios workers de gunicorn arrancan a la vez,
+    # creen tablas y columnas de uno en uno (si no, pueden chocar en el primer deploy).
+    # "xact" = se suelta solo al hacer commit al final de esta función.
+    cur.execute("SELECT pg_advisory_xact_lock(20261116)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS catalogo (
             id          SERIAL PRIMARY KEY,
@@ -155,6 +182,23 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id            SERIAL PRIMARY KEY,
+            usuario       TEXT NOT NULL UNIQUE,
+            nombre        TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            rol           TEXT NOT NULL CHECK (rol IN ('admin', 'cajero')),
+            activo        BOOLEAN NOT NULL DEFAULT TRUE,
+            creado        TEXT NOT NULL
+        )
+    """)
+    # Quién hizo cada venta. `vendedor` copia el nombre (como el nombre del producto)
+    # para que el histórico no cambie si luego se edita el usuario.
+    _ensure_column(conn, "ventas", "usuario_id", "INTEGER")
+    _ensure_column(conn, "ventas", "vendedor", "TEXT")
+    crear_admin_inicial(conn)
+
     conn.commit()
     conn.close()
 
@@ -169,6 +213,240 @@ def _ensure_column(conn, table, column, definition):
     """, (table, column))
     if not cur.fetchone():
         cur.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}')
+
+# ── AUTENTICACIÓN Y ROLES ────────────────────────────────
+# Ver docs/planes/2026-11-16-login-roles.md
+ROLES = ("admin", "cajero")
+MIN_LARGO_PASSWORD = 8
+CACHE_USUARIO_SEG = 60
+# Caché en memoria {uid: (datos_usuario | None, vence_en)}. Cada worker de gunicorn
+# tiene la suya: evita una conexión extra a la BD por cada petición. El precio es
+# que desactivar a alguien tarda hasta 60 s en aplicarse en los otros workers.
+_cache_usuarios = {}
+# Hash de relleno: si el usuario no existe igual se calcula un hash, para que el
+# tiempo de respuesta no delate qué usuarios existen.
+_HASH_RELLENO = generate_password_hash("relleno-no-es-una-clave")
+
+
+def _ahora():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def crear_admin_inicial(conn):
+    """Crea el primer admin desde ADMIN_USUARIO / ADMIN_PASSWORD si no hay usuarios."""
+    if query(conn, "SELECT 1 FROM usuarios LIMIT 1").fetchone():
+        return
+    usuario = (os.environ.get("ADMIN_USUARIO") or "").strip()
+    password = os.environ.get("ADMIN_PASSWORD") or ""
+    if not usuario or not password:
+        print("AVISO: no hay usuarios. Define ADMIN_USUARIO y ADMIN_PASSWORD para crear el primer admin.")
+        return
+    if len(password) < MIN_LARGO_PASSWORD:
+        print(f"AVISO: ADMIN_PASSWORD debe tener al menos {MIN_LARGO_PASSWORD} caracteres. No se creó el admin.")
+        return
+    # ON CONFLICT: si dos workers arrancan a la vez, solo uno lo inserta.
+    creado = query(conn, """
+        INSERT INTO usuarios (usuario, nombre, password_hash, rol, creado)
+        VALUES (%s, %s, %s, 'admin', %s)
+        ON CONFLICT (usuario) DO NOTHING
+        RETURNING id
+    """, (usuario, usuario, generate_password_hash(password), _ahora())).fetchone()
+    if creado:
+        print(f"Admin inicial '{usuario}' creado.")  # nunca se imprime la contraseña
+
+
+def usuario_actual():
+    """Usuario de la sesión si existe y está activo; si no, None.
+    Lanza psycopg2.Error si la BD no responde."""
+    uid = session.get("uid")
+    if not uid:
+        return None
+    en_cache = _cache_usuarios.get(uid)
+    if en_cache and en_cache[1] > time.monotonic():
+        return en_cache[0]
+    conn = get_db()
+    try:
+        fila = query(conn, """
+            SELECT id, usuario, nombre, rol, activo FROM usuarios WHERE id = %s
+        """, (uid,)).fetchone()
+    finally:
+        conn.close()
+    datos = dict(fila) if fila and fila["activo"] else None
+    _cache_usuarios[uid] = (datos, time.monotonic() + CACHE_USUARIO_SEG)
+    return datos
+
+
+# Endpoints (nombres de función de Flask) que no exigen sesión.
+RUTAS_PUBLICAS = {"login", "static"}
+
+
+@app.before_request
+def exigir_login():
+    """Corre antes de TODAS las rutas: todo está protegido salvo RUTAS_PUBLICAS."""
+    if request.endpoint in RUTAS_PUBLICAS:
+        return None
+    try:
+        usuario = usuario_actual()
+    except psycopg2.Error:
+        # La BD no responde: no es "no autorizado", es "no disponible".
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "error": "Base de datos no disponible, intenta de nuevo"}), 503
+        return "Base de datos no disponible, recarga en unos segundos.", 503
+    if not usuario:
+        session.clear()
+        # Las descargas de reportes son navegación normal (window.location), no fetch:
+        # para ellas y para las páginas se redirige al login en vez de responder JSON.
+        if request.path.startswith("/api/") and not request.path.startswith("/api/reportes/"):
+            return jsonify({"ok": False, "error": "Inicia sesión"}), 401
+        return redirect(url_for("login"))
+    g.usuario = usuario  # g dura solo esta petición
+    return None
+
+
+def solo_admin(f):
+    """Decorador: responde 403 si quien llama no es admin. Va DEBAJO de @app.route."""
+    @wraps(f)
+    def envuelta(*args, **kwargs):
+        if g.usuario["rol"] != "admin":
+            return jsonify({"ok": False, "error": "Solo el administrador puede hacer esto"}), 403
+        return f(*args, **kwargs)
+    return envuelta
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        try:
+            if usuario_actual():
+                return redirect(url_for("index"))
+        except psycopg2.Error:
+            pass  # sin BD igual se muestra el formulario
+        return render_template("login.html", error=None, usuario="")
+
+    usuario = (request.form.get("usuario") or "").strip()
+    password = request.form.get("password") or ""
+    if "\x00" in usuario:  # psycopg2 no acepta el byte nulo: se trata como usuario inexistente
+        usuario = ""
+    try:
+        conn = get_db()
+        try:
+            fila = query(conn, """
+                SELECT id, password_hash, activo FROM usuarios WHERE usuario = %s
+            """, (usuario,)).fetchone()
+        finally:
+            conn.close()
+    except psycopg2.Error:
+        return render_template("login.html", error="Base de datos no disponible, intenta de nuevo.", usuario=usuario), 503
+
+    # Mismo mensaje y mismo trabajo (un hash) exista o no el usuario.
+    hash_guardado = fila["password_hash"] if fila else _HASH_RELLENO
+    clave_ok = check_password_hash(hash_guardado, password)
+    if not fila or not fila["activo"] or not clave_ok:
+        return render_template("login.html", error="Usuario o contraseña incorrectos.", usuario=usuario), 401
+
+    # clear() antes de guardar el uid: evita reutilizar una sesión previa (session fixation).
+    session.clear()
+    session.permanent = True
+    session["uid"] = fila["id"]
+    _cache_usuarios.pop(fila["id"], None)
+    return redirect(url_for("index"))
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+def _json_dict():
+    d = request.get_json(silent=True)
+    return d if isinstance(d, dict) else {}
+
+
+def _password_valida(p):
+    return isinstance(p, str) and len(p) >= MIN_LARGO_PASSWORD
+
+
+@app.route("/api/usuarios", methods=["GET"])
+@solo_admin
+def usuarios_listar():
+    conn = get_db()
+    try:
+        rows = query(conn, """
+            SELECT id, usuario, nombre, rol, activo, creado FROM usuarios ORDER BY usuario
+        """).fetchall()  # nunca se envía password_hash
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/usuarios", methods=["POST"])
+@solo_admin
+def usuarios_crear():
+    d = _json_dict()
+    usuario, nombre = d.get("usuario"), d.get("nombre")
+    rol, password = d.get("rol", "cajero"), d.get("password")
+    if not isinstance(usuario, str) or not usuario.strip() or len(usuario.strip()) > 50 or "\x00" in usuario:
+        return jsonify({"ok": False, "error": "Escribe un usuario (máximo 50 caracteres)"}), 400
+    if not isinstance(nombre, str) or not nombre.strip() or "\x00" in nombre:
+        return jsonify({"ok": False, "error": "Escribe el nombre de la persona"}), 400
+    if rol not in ROLES:
+        return jsonify({"ok": False, "error": "Rol inválido"}), 400
+    if not _password_valida(password):
+        return jsonify({"ok": False, "error": f"La contraseña debe tener al menos {MIN_LARGO_PASSWORD} caracteres"}), 400
+
+    conn = get_db()
+    try:
+        fila = query(conn, """
+            INSERT INTO usuarios (usuario, nombre, password_hash, rol, creado)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (usuario) DO NOTHING
+            RETURNING id
+        """, (usuario.strip(), nombre.strip(), generate_password_hash(password), rol, _ahora())).fetchone()
+        if not fila:
+            return jsonify({"ok": False, "error": "Ese usuario ya existe"}), 409
+        conn.commit()
+        return jsonify({"ok": True, "id": fila["id"]})
+    finally:
+        conn.close()
+
+
+@app.route("/api/usuarios/<int:uid>", methods=["PUT"])
+@solo_admin
+def usuarios_editar(uid):
+    d = _json_dict()
+    cambios = {}  # columna -> valor. Las columnas salen de esta lista fija, nunca del cliente.
+    if "activo" in d:
+        if not isinstance(d["activo"], bool):
+            return jsonify({"ok": False, "error": "activo debe ser true o false"}), 400
+        cambios["activo"] = d["activo"]
+    if "rol" in d:
+        if d["rol"] not in ROLES:
+            return jsonify({"ok": False, "error": "Rol inválido"}), 400
+        cambios["rol"] = d["rol"]
+    if "password" in d:
+        if not _password_valida(d["password"]):
+            return jsonify({"ok": False, "error": f"La contraseña debe tener al menos {MIN_LARGO_PASSWORD} caracteres"}), 400
+        cambios["password_hash"] = generate_password_hash(d["password"])
+    if not cambios:
+        return jsonify({"ok": False, "error": "No hay nada que cambiar"}), 400
+    # Nunca dejar la app sin el admin que está haciendo la petición.
+    if uid == g.usuario["id"] and (cambios.get("activo") is False or cambios.get("rol", "admin") != "admin"):
+        return jsonify({"ok": False, "error": "No puedes desactivarte ni quitarte el rol de admin"}), 400
+
+    set_sql = ", ".join(f"{col} = %s" for col in cambios)
+    conn = get_db()
+    try:
+        fila = query(conn, f"UPDATE usuarios SET {set_sql} WHERE id = %s RETURNING id",
+                     (*cambios.values(), uid)).fetchone()
+        if not fila:
+            return jsonify({"ok": False, "error": "Usuario no encontrado"}), 404
+        conn.commit()
+    finally:
+        conn.close()
+    _cache_usuarios.pop(uid, None)  # que el cambio aplique ya en este worker
+    return jsonify({"ok": True})
+
 
 # ── INVIMA ────
 @app.route("/api/invima/buscar")
@@ -385,6 +663,7 @@ def catalogo_listar():
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/catalogo", methods=["POST"])
+@solo_admin
 def catalogo_crear():
     d = request.json
     conn = get_db()
@@ -410,6 +689,7 @@ def inventario_listar():
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/inventario", methods=["POST"])
+@solo_admin
 def inventario_agregar():
     d = request.json
     conn = get_db()
@@ -445,6 +725,7 @@ def inventario_agregar():
         return jsonify({"ok": True, "accion": "creado"})
 
 @app.route("/api/inventario/<int:item_id>", methods=["DELETE"])
+@solo_admin
 def inventario_eliminar(item_id):
     conn = get_db()
     query(conn, "DELETE FROM inventario WHERE id = %s", (item_id,))
@@ -453,6 +734,7 @@ def inventario_eliminar(item_id):
     return jsonify({"ok": True})
 
 @app.route("/api/inventario/<int:item_id>", methods=["PUT"])
+@solo_admin
 def inventario_actualizar(item_id):
     d = request.json
     conn = get_db()
@@ -466,6 +748,7 @@ def inventario_actualizar(item_id):
     return jsonify({"ok": True})
 
 @app.route("/api/inventario/importar", methods=["POST"])
+@solo_admin
 def inventario_importar():
     import pandas as pd
     from werkzeug.utils import secure_filename
@@ -547,6 +830,7 @@ def inventario_importar():
     return jsonify({"ok": True, "preview": preview, "columnas": cols_disponibles})
 
 @app.route("/api/inventario/confirmar-importacion", methods=["POST"])
+@solo_admin
 def inventario_confirmar_importacion():
     d = request.json
     items = d.get("items", [])
@@ -591,6 +875,7 @@ def inventario_confirmar_importacion():
     return jsonify({"ok": True, "insertados": insertados, "actualizados": actualizados})
 
 @app.route("/api/inventario/recategorizar", methods=["POST"])
+@solo_admin
 def inventario_recategorizar():
     conn = get_db()
     productos = query(conn, "SELECT id, principio, nombre FROM inventario WHERE categoria IS NULL OR categoria = ''").fetchall()
@@ -608,6 +893,7 @@ def inventario_recategorizar():
 
 # ── REPORTES ───────────────────────────────────────────────
 @app.route("/api/reportes/inventario")
+@solo_admin
 def reporte_inventario():
     import pandas as pd
     from openpyxl.styles import Font, PatternFill, Alignment, numbers
@@ -726,6 +1012,7 @@ def reporte_inventario():
     )
 
 @app.route("/api/reportes/ventas")
+@solo_admin
 def reporte_ventas():
     import pandas as pd
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -821,6 +1108,7 @@ def reporte_ventas():
     )
 
 @app.route("/api/reportes/utilidad")
+@solo_admin
 def reporte_utilidad():
     import pandas as pd
     from io import BytesIO
@@ -1045,9 +1333,9 @@ def registrar_venta():
         import datetime
         fecha_actual = datetime.datetime.now().isoformat(timespec="seconds")
         query(conn, """
-            INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, costo_unitario, total, fecha, metodo_pago, es_credito, cliente_nombre)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (item["id"], item["nombre"], item["laboratorio"], cantidad, item["precio"], item["precio_costo"], total, fecha_actual, metodo_pago, es_credito, cliente_nombre if es_credito else None))
+            INSERT INTO ventas (inventario_id, nombre, laboratorio, cantidad, precio_unitario, costo_unitario, total, fecha, metodo_pago, es_credito, cliente_nombre, usuario_id, vendedor)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (item["id"], item["nombre"], item["laboratorio"], cantidad, item["precio"], item["precio_costo"], total, fecha_actual, metodo_pago, es_credito, cliente_nombre if es_credito else None, g.usuario["id"], g.usuario["nombre"]))
 
         if es_credito:
             query(conn, """
@@ -1111,6 +1399,7 @@ def _variacion_pct(actual, anterior):
 
 
 @app.route("/api/analytics/comparativa", methods=["GET"])
+@solo_admin
 def analytics_comparativa():
     if err := _premium_required():
         return err
@@ -1138,6 +1427,7 @@ def analytics_comparativa():
 
 
 @app.route("/api/analytics/rotacion", methods=["GET"])
+@solo_admin
 def analytics_rotacion():
     if err := _premium_required():
         return err
@@ -1161,6 +1451,7 @@ def analytics_rotacion():
 
 
 @app.route("/api/analytics/rentabilidad", methods=["GET"])
+@solo_admin
 def analytics_rentabilidad():
     if err := _premium_required():
         return err
@@ -1188,6 +1479,7 @@ def analytics_rentabilidad():
 
 
 @app.route("/api/analytics/margen", methods=["GET"])
+@solo_admin
 def analytics_margen():
     if err := _premium_required():
         return err
@@ -1216,6 +1508,7 @@ def analytics_margen():
 
 
 @app.route("/api/analytics/proyeccion", methods=["GET"])
+@solo_admin
 def analytics_proyeccion():
     import datetime
     if err := _premium_required():
@@ -1252,7 +1545,7 @@ def analytics_proyeccion():
 # ── PÁGINA PRINCIPAL ─────────────────────────────────────
 @app.route("/")
 def index():
-    return render_template("index.html", premium_enabled=PREMIUM_ENABLED)
+    return render_template("index.html", premium_enabled=PREMIUM_ENABLED, usuario=g.usuario)
 
 # ── INIT_DB EN TOP-LEVEL ────────────────────────────────
 # ¿Por qué aquí y no dentro de `if __name__ == "__main__"`?
